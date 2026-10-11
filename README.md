@@ -1,3 +1,5 @@
+<img src=".github/logo.png" width="150" alt="BetterItemStack">
+
 # BetterItemStack
 
 > 一个可以**按容器类型分别控制**物品堆叠上限的 Minecraft 模组。
@@ -7,7 +9,7 @@
 - 支持 Minecraft **1.20.1**，Fabric / Forge / NeoForge 三平台
 - 需要 **Java 17**
 - 基于 [ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发
-- 仓库：<https://github.com/Zhugey/betteritemstack>
+- 仓库：<https://github.com/Zhugey/BetterItemStack>
 
 ---
 
@@ -668,10 +670,10 @@ common/                                  平台无关的全部逻辑与资源
 │       ├── ItemEntityMixin.java         掉落物合并上限
 │       └── client/DrawContextMixin.java 角标数字缩写
 └── src/main/resources/
+    ├── icon.png                         模组图标（三平台共用，也是仓库 README 的图）
     ├── betteritemstack.mixins.json      8 个公共 mixin + 1 个客户端专属
     ├── pack.mcmeta
     └── assets/betteritemstack/
-        ├── icon.png
         └── lang/                        10 种语言
 
 fabric/                                  Fabric 入口 + fabric.mod.json + Platform 实现

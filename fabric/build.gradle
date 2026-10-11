@@ -1,0 +1,42 @@
+// ===========================================================================
+// fabric —— Fabric 平台
+//
+// 映射用 officialMojangMappings()（不是 Yarn）：common 的源码必须能被三个平台
+// 同时编译，而 Forge / NeoForge 那边只有官方映射，所以"全平台统一官方映射"
+// 是共享 common 的必要条件，不是偏好。
+// ===========================================================================
+plugins {
+    id 'multiloader-loader'
+    id 'fabric-loom'
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    // Fabric API 按 MC 小版本一条独立版本线，必须选对 +MC 那条（已在 gradle.properties 固定）。
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+}
+
+loom {
+    mixin {
+        // Loom 1.12 起 Mixin 注解处理器默认关闭。本项目的 mixin 配置里写了
+        // "refmap"，三个平台共用同一份配置，所以这边要显式把 AP 打开并指定同名 refmap。
+        useLegacyMixinAp = true
+        defaultRefmapName.set("${mod_id}.refmap.json")
+    }
+    runs {
+        client {
+            client()
+            setConfigName('Fabric Client')
+            ideConfigGenerated(true)
+            runDir('run')
+        }
+        server {
+            server()
+            setConfigName('Fabric Server')
+            ideConfigGenerated(true)
+            runDir('run')
+        }
+    }
+}

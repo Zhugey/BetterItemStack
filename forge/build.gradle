@@ -1,0 +1,44 @@
+// ===========================================================================
+// forge —— MinecraftForge 1.20.1
+//
+// 用 ModDevGradle 的 legacyforge 插件（不是经典 ForgeGradle）：
+//   - 原生提供 mixin { add / config } DSL，自动产出 refmap；
+//   - 自动为 jar 任务配置 reobfJar（Forge 1.20.1 生产环境用 SRG 名），
+//     未重混淆的版本会被挪到 build/devlibs，build/libs 里是可直接分发的那个。
+// ===========================================================================
+plugins {
+    id 'multiloader-loader'
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+mixin {
+    add sourceSets.main, "${mod_id}.refmap.json"
+    config "${mod_id}.mixins.json"
+}
+
+legacyForge {
+    version = forge_version
+
+    runs {
+        client { client() }
+        server { server() }
+        data { data() }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+jar {
+    manifest.attributes([
+            // Forge 通过 manifest 的 MixinConfigs 找到混入配置。
+            'MixinConfigs': "${mod_id}.mixins.json",
+    ])
+}

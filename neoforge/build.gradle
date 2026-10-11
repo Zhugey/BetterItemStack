@@ -1,0 +1,49 @@
+// ===========================================================================
+// neoforge —— NeoForge 1.20.1（早期版本）
+//
+// 1.20.1 的 NeoForge 是 Forge 47.x 的镜像：坐标 net.neoforged:forge、包名仍是
+// net.minecraftforge、loader 的 modid 仍是 forge。所以：
+//   - 源码与 mods.toml 与 forge 子项目完全一致；
+//   - 唯一差别是 legacyForge 用 neoForgeVersion 模式解析 net.neoforged 坐标。
+// 单独出一份产物，是为了让 NeoForge 用户在检索时能直接命中，而不是靠 README 说明。
+// ===========================================================================
+plugins {
+    id 'multiloader-loader'
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+mixin {
+    add sourceSets.main, "${mod_id}.refmap.json"
+    config "${mod_id}.mixins.json"
+}
+
+legacyForge {
+    // MDG 2.0.148 起，三种版本模式（forgeVersion / neoForgeVersion / mcpVersion）
+    // 移到了 enable {} 块里的 LegacyForgeModdingSettings 上，而不是外层扩展。
+    // 这里必须用 neoForgeVersion，它才会去解析 net.neoforged:forge 坐标。
+    enable {
+        neoForgeVersion = neoforge_version
+    }
+
+    runs {
+        client { client() }
+        server { server() }
+        data { data() }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+jar {
+    manifest.attributes([
+            'MixinConfigs': "${mod_id}.mixins.json",
+    ])
+}

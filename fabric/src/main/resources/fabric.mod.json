@@ -1,0 +1,31 @@
+{
+	"schemaVersion": 1,
+	"id": "${mod_id}",
+	"version": "${version}",
+	"name": "${mod_name}",
+	"description": "${description}",
+	"authors": [
+		"${mod_author}"
+	],
+	"contact": {
+		"sources": "https://github.com/Zhugey/betteritemstack",
+		"issues": "https://github.com/Zhugey/betteritemstack/issues"
+	},
+	"license": "${license}",
+	"icon": "assets/${mod_id}/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.zhugey.betteritemstack.fabric.BetterItemStackFabric"
+		]
+	},
+	"mixins": [
+		"${mod_id}.mixins.json"
+	],
+	"depends": {
+		"fabricloader": "${fabric_loader_requires}",
+		"minecraft": "${minecraft_version}",
+		"java": ">=${java_version}",
+		"fabric-api": "*"
+	}
+}

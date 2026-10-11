@@ -1,0 +1,38 @@
+// ===========================================================================
+// 约定插件：三个平台子项目（fabric / forge / neoforge）共用
+//
+// 它把 common 子项目的**源码目录与资源目录**挂到平台子项目上：
+//   - commonJava       → 追加进 compileJava 的 source
+//   - commonResources  → 追加进 processResources 的 from
+// 于是平台子项目编译出来的就是"common + 自己"的一个整体，不需要任何跨映射重映射。
+// ===========================================================================
+plugins {
+    id 'multiloader-common'
+}
+
+configurations {
+    commonJava {
+        canBeResolved = true
+    }
+    commonResources {
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    // 只为传递 common 的 api 依赖；类本身由上面的源码目录提供。
+    compileOnly project(':common')
+
+    commonJava project(path: ':common', configuration: 'commonJava')
+    commonResources project(path: ':common', configuration: 'commonResources')
+}
+
+tasks.named('compileJava', JavaCompile) {
+    dependsOn configurations.commonJava
+    source configurations.commonJava
+}
+
+processResources {
+    dependsOn configurations.commonResources
+    from configurations.commonResources
+}

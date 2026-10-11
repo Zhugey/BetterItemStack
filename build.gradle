@@ -1,0 +1,13 @@
+// 根项目只负责声明平台插件的版本，不应用到自身（apply false）。
+// 各子项目按需应用：fabric 用 fabric-loom，common / forge / neoforge 用 ModDevGradle legacyforge。
+plugins {
+    id 'fabric-loom' version "${loom_version}" apply false
+    id 'net.neoforged.moddev.legacyforge' version "${moddev_version}" apply false
+}
+
+// 所有子项目统一 group / version。
+// 产物名统一为 <archives_base_name>-<minecraft_version>-<平台>-<mod_version>.jar
+subprojects {
+    group = rootProject.maven_group
+    version = rootProject.mod_version
+}

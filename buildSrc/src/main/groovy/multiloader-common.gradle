@@ -1,0 +1,106 @@
+// ===========================================================================
+// 约定插件：common / fabric / forge / neoforge 四个子项目共用
+//
+// 关键设计：**没有一个子项目产出"被其它子项目依赖"的 jar**。
+// 平台子项目通过 `multiloader-loader` 里声明的 commonJava / commonResources
+// 两个配置，把 common 的**源码目录**直接拉进自己的编译单元，各自用本平台的
+// 映射与工具链编译一遍。这样彻底绕开了"把一份 class 从 A 映射重映射到 B 映射"
+// 的问题 —— 代价是公共代码会被编译三次（本 Mod 规模下无感）。
+// ===========================================================================
+plugins {
+    id 'java-library'
+}
+
+// 产物名：<archives_base_name>-<minecraft_version>-<平台>
+// 拼上 version 后即 BetterItemStack-1.20.1-fabric-1.0.0.jar（与 JEI 等主流模组同款命名）。
+base {
+    archivesName = "${archives_base_name}-${minecraft_version}-${project.name}"
+}
+
+// 在配置阶段就把需要的值取出来存成局部变量。
+// processResources 的闭包是"执行阶段"才跑的，闭包内直接访问 project 会触发
+// Gradle 的 "Invocation of Task.project at execution time" 弃用告警
+//（Gradle 10.0 起为错误，且与配置缓存不兼容）。
+def pModId = project.mod_id
+def pModName = project.mod_name
+def pModAuthor = project.mod_author
+def pArchiveBase = project.archives_base_name
+def pMcVersion = project.minecraft_version
+def pVersion = project.version
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(project.java_version)
+    // 刻意不产出 sources / javadoc jar：本 Mod 只通过 GitHub Release 向玩家分发主 jar，
+    // 源码本来就公开在仓库里，附一个 -sources.jar 对玩家没有意义。
+}
+
+repositories {
+    mavenCentral()
+    // Mixin 只在 Sponge 的仓库里，且不希望被别的仓库的同名坐标污染。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Sponge'
+                url = 'https://repo.spongepowered.org/repository/maven-public'
+            }
+        }
+        filter { includeGroupAndSubgroups('org.spongepowered') }
+    }
+}
+
+jar {
+    // LICENSE 会被打进 jar，所以 .gitattributes 里必须给它固定 eol=lf，
+    // 否则 Windows / Linux 两边打出的 jar 有一个条目对不上。
+    from(rootProject.file('LICENSE')) {
+        rename { "${it}_${pArchiveBase}" }
+    }
+
+    manifest {
+        attributes([
+                'Specification-Title'   : pModName,
+                'Specification-Vendor'  : pModAuthor,
+                'Specification-Version' : pVersion,
+                'Implementation-Title'  : project.name,
+                'Implementation-Version': pVersion,
+                'Implementation-Vendor' : pModAuthor,
+                'Built-On-Minecraft'    : pMcVersion,
+        ])
+    }
+}
+
+processResources {
+    def expandProps = [
+            'version'                     : pVersion,
+            'mod_id'                      : pModId,
+            'mod_name'                    : pModName,
+            'mod_author'                  : pModAuthor,
+            'archives_base_name'          : pArchiveBase,
+            'license'                     : project.license,
+            'credits'                     : project.credits,
+            'description'                 : project.description,
+            'minecraft_version'           : project.minecraft_version,
+            'minecraft_version_min'       : project.minecraft_version_min,
+            'minecraft_version_max'       : project.minecraft_version_max,
+            'minecraft_version_range'     : project.minecraft_version_range,
+            'java_version'                : project.java_version,
+            'fabric_loader_version'       : project.fabric_loader_version,
+            'fabric_loader_requires'      : project.fabric_loader_requires,
+            'fabric_api_version'          : project.fabric_api_version,
+            'forge_version'               : project.forge_version,
+            'forge_version_range'         : project.forge_version_range,
+            'forge_loader_version_range'  : project.forge_loader_version_range,
+            'neoforge_version'            : project.neoforge_version,
+            'neoforge_version_range'      : project.neoforge_version_range,
+            'neoforge_loader_version_range': project.neoforge_loader_version_range,
+    ]
+    inputs.properties(expandProps)
+
+    // 必须写成赋值形式：`filteringCharset "UTF-8"` 这种空格调用写法已弃用。
+    filteringCharset = 'UTF-8'
+    filesMatching(['fabric.mod.json', 'pack.mcmeta', '*.mixins.json']) {
+        expand expandProps
+    }
+    filesMatching(['META-INF/mods.toml']) {
+        expand expandProps
+    }
+}

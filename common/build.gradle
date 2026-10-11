@@ -1,0 +1,39 @@
+// ===========================================================================
+// common —— 平台无关的公共源码
+//
+// 本身不产出任何被依赖的 jar，只把源码/资源目录"发布"成两个配置供平台子项目取用
+//（见 buildSrc/.../multiloader-loader.gradle）。
+//
+// 这里应用 ModDevGradle 的 legacyforge 插件是为了在 **MCP-only 模式**下拿到
+// Minecraft（1.20.1 的 MCP = 官方命名 + 参数名），从而让 common 在 IDE 里能独立
+// 编译与索引。它不会把 Forge 拖进来 —— mcpVersion 模式只加 vanilla Minecraft。
+// ===========================================================================
+plugins {
+    id 'multiloader-common'
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+legacyForge {
+    mcpVersion = minecraft_version
+}
+
+dependencies {
+    compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
+    compileOnly group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.1'
+}
+
+configurations {
+    commonJava {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+    commonResources {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+}
+
+artifacts {
+    commonJava sourceSets.main.java.sourceDirectories.singleFile
+    commonResources sourceSets.main.resources.sourceDirectories.singleFile
+}

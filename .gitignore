@@ -1,0 +1,44 @@
+# gradle
+
+.gradle/
+build/
+out/
+classes/
+
+# eclipse
+
+*.launch
+
+# idea
+
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+
+# macos
+
+*.DS_Store
+
+# fabric
+
+run/
+
+# 误从项目根目录启动游戏时产生的日志目录
+
+logs/
+
+# java
+
+hs_err_*.log
+replay_*.log
+*.hprof
+*.jfr

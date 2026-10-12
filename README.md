@@ -379,7 +379,6 @@ Stackable 是"把**所有**容器的堆叠上限一起抬高"；本模组默认�
 | `dispenser` | 发射器 |
 | `furnace` | 熔炉 · 高炉 · 烟熏炉 |
 | `brewing_stand` | 酿造台 |
-| `crafter` | 合成器 |
 
 ### 其它字段
 
@@ -442,8 +441,7 @@ Stackable 是"把**所有**容器的堆叠上限一起抬高"；本模组默认�
 可用容器键名:
 player_inventory（物品栏） · chest（箱子 · 陷阱箱） · barrel（木桶） · shulker_box（潜影盒） ·
 ender_chest（末影箱） · chest_minecart（运输矿车） · hopper（漏斗） · hopper_minecart（漏斗矿车） ·
-dropper（投掷器） · dispenser（发射器） · furnace（熔炉 · 高炉 · 烟熏炉） · brewing_stand（酿造台） ·
-crafter（合成器）
+dropper（投掷器） · dispenser（发射器） · furnace（熔炉 · 高炉 · 烟熏炉） · brewing_stand（酿造台）
 --- 示例: 如何让更多容器保持原版 ---
 黑名单模式下，想让木桶也保持原版上限，就在 config/betteritemstack.json 的 containers.list 里
 加入 "barrel"，改完执行 /bis reload。

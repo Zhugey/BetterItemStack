@@ -6,8 +6,8 @@
 > 箱子、木桶、潜影盒、玩家背包可以堆到极大值；**漏斗与漏斗矿车保持原版上限**，
 > 红石计时器与计数器因此不受影响。
 
-- 支持 Minecraft **1.20.1**，Fabric / Forge / NeoForge 三平台
-- 需要 **Java 17**
+- 支持 Minecraft **1.21.1**，Fabric / Forge / NeoForge 三平台
+- 需要 **Java 21**
 - 基于 [ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发
 - 仓库：<https://github.com/Zhugey/BetterItemStack>
 
@@ -31,7 +31,8 @@
 
 ## 它解决什么问题
 
-原版把"每格最多 64 件"写死在多个层面里。常见的堆叠模组会把上限全局拉高，但这会带来一个
+原版每格能放多少，由"容器自身的上限"与"物品上限"两者取小决定（容器默认 99、普通物品 64，
+实际就是 64），这个值写死在多个层面里。常见的堆叠模组会把上限全局拉高，但这会带来一个
 副作用：**漏斗也是靠同一套数值判定"装满了没有"**。漏斗一旦不再"装满即停"，以 16 / 64
 计数的红石计时器、计数器就全部失效——因为漏斗会一直往外搬东西。
 
@@ -99,15 +100,19 @@ min(容器自身的 getMaxStackSize() / 槽位自身的 getMaxStackSize(),  item
 改写 `getMaxStackSize()` 之后，"这件物品原本能堆多少"在游戏内就不可考了——这也是很多同类模组
 不得不维护一张上千条 JSON 表的原因。
 
-本模组换了一条路：1.20 一代还没有物品组件，原版上限就声明在 `Item.Properties#stacksTo()` 里、
-由 `Item#getMaxStackSize()` 暴露，所以直接读**物品级**上限即可：
+本模组换了一条路：本代（1.20.5 起）堆叠上限是一件**物品组件** `minecraft:max_stack_size`
+（声明入口仍是 `Item.Properties#stacksTo()`），所以直接读组件即可：
 
 ```java
-int limit = stack.getItem().getMaxStackSize();
+int limit = stack.getOrDefault(DataComponents.MAX_STACK_SIZE, 1);
 ```
 
 绕开了 `ItemStack` 上被改写的方法，因此不会受影响；而且**对模组新增物品同样有效**，
 无需任何维护。
+
+> 为什么不按"物品"取上限：本代原版的 `Item` 上**已经没有**取上限的方法——1.20.5 起
+> `Item#getMaxStackSize()` 被 `Item#getDefaultMaxStackSize()` 取代，而 NeoForge 又把
+> "按堆叠取值"的版本移进了扩展接口。**直接读组件是三个平台唯一都成立的写法。**
 
 ### 四、为什么必须保留"槽位自身声明的上限"
 
@@ -120,8 +125,8 @@ this.addSlot(new Slot(this.enchantSlots, 0, 15, 47) {
 });
 ```
 
-附魔台与附魔灌注台的判定都要求槽内**恰好 1 件**（`Item#isEnchantable` 检查
-`getMaxStackSize() == 1`、`BookItem` 的同名方法检查 `getCount() == 1`）。一旦绕过这个 1，
+附魔台与附魔灌注台的判定都要求槽内**恰好 1 件**（`Item#isEnchantable(ItemStack)` 检查
+`getMaxStackSize() == 1`、`BookItem` 的同名重载检查 `getCount() == 1`）。一旦绕过这个 1，
 整摞物品就能被 shift-click 塞进单件槽位，判定随即失败——表现为**附魔台不显示附魔、
 附魔灌注台无法使用**。
 
@@ -144,165 +149,122 @@ this.addSlot(new Slot(this.enchantSlots, 0, 15, 47) {
 
 | Mixin | 目标（官方映射名） | 作用 |
 |---|---|---|
-| `ItemStackMixin` | `ItemStack#getMaxStackSize` | 把可堆叠物品的上限提升为 `global_max` |
-| | `ItemStack#save` / `ItemStack#of` | **落盘**的数量由字节改为 int（见第八节） |
+| `ItemStackMixin` | `ItemStack` 的静态初始化块（`<clinit>`） | 整体替换 `CODEC`，把数量区间放开到 `[1, Integer.MAX_VALUE]`（见第八节） |
+| | `ItemStack#getMaxStackSize` | 把可堆叠物品的上限提升为 `global_max` |
 | | `ItemStack#getTooltipLines` | 追加堆叠数量提示 |
-| `PacketByteBufMixin` | `FriendlyByteBuf#writeItem` / `#readItem` | **网络包**里的数量由字节改为 VarInt（见第八节） |
-| `ServerPlayNetworkHandlerMixin` | `ServerGamePacketListenerImpl#handleSetCreativeModeSlot` 里的 `getCount()` | 创造模式取物的服务端校验由硬编码 64 改为真实上限（见第八节） |
-| `InventoryMixin` | `Container#getMaxStackSize`（`@Overwrite`） | 按容器类型区分每格容量 |
+| `InventoryMixin` | `Container#getMaxStackSize` 与 `#getMaxStackSize(ItemStack)`（`@Overwrite`） | 按容器类型区分每格容量 |
 | `SlotMixin` | `Slot#getMaxStackSize(ItemStack)` | GUI 侧容量，保留槽位自身声明的上限 |
 | `ScreenHandlerMixin` | `AbstractContainerMenu#addSlot` | 客户端 GUI 的镜像容器按界面类型登记，与服务端判定对齐 |
 | `HopperBlockEntityMixin` | `HopperBlockEntity#isFullContainer` / `#tryMoveInItem` / `#inventoryFull` / `#canMergeItems` | 漏斗四处判定接回容器感知逻辑 |
 | `ItemEntityMixin` | `ItemEntity#merge` | 掉落物合并上限 |
 | `DrawContextMixin`（客户端） | `GuiGraphics#renderItemDecorations` | 角标数字缩写为 K / M / B |
 
-> 本代（1.20 一代）**没有** 1.20.5+ 的那个 `ItemStack` 静态初始化注入：那一版起原版把数量
-> 收窄成 `rangedInt(1, 99)` 才需要重写 Codec；本代原版 Codec 里数量本来就是不限范围的
-> `Codec.INT`，不需要动。
->
-> 表中用 **Mojang 官方映射名**（1.20.1 上它与 Forge 的 MCP 名一致）——全平台共用一份源码，
-> 必须统一映射。
+> 表中用 **Mojang 官方映射名**——全平台共用一份源码，必须统一映射。Fabric 侧的产物在构建时
+> 会被重映射到 intermediary；Forge / NeoForge 自 1.20.6 起在**运行期**就是官方命名，
+> 那两份产物因此不需要 refmap。
 
-### 七、两处安全夹取（防止调低上限时出现负数增量）
+### 七、三处安全夹取（防止调低上限时丢物品 / 出现负数增量）
 
-`global_max` 可以在游戏内用 `/bis set` 调低。此时若某个格子里的数量已经超过新上限，
-原版有几处会据此算出**负数增量**：
+`global_max` 可以在游戏内用 `/bis set` 调低，而本代原版有 6 处会拿"容器上限"当参数去做
+**破坏性截断**：
 
-> **本代暂无 `ItemStack#capCount`**：1.20.5 起原版多了 6 处
-> `stack.limitSize(this.getMaxStackSize(stack))`，会把超量堆叠**静默截断**（一次丢掉几千个），
-> 那边必须把上限返回值夹到不小于当前数量来抵消。本代还没有这条路径，
-> 所以这里只剩"负数增量"这一类风险。
+> **1.20.5 起原版多了"插入即截断"**：`setItem` 之后会调用
+> `stack.limitSize(this.getMaxStackSize(stack))`（`BaseContainerBlockEntity`、`HopperBlockEntity`、
+> `SimpleContainer`、`AbstractFurnaceBlockEntity`、`MerchantContainer`、`ContainerEntity` 共 6 处）。
+> `ItemStack#limitSize` 的实现就是 `setCount(maxCount)`——**超出的部分被销毁且不返还**。
+> 于是把上限从 9999 调到 1000 之后，箱子里任何一次 `setItem` 都会把已有的 9999 截成 1000，
+> 一次性丢掉 8999 个。
 
-1. `SlotMixin#getMaxStackSize(ItemStack)`：保证 GUI 侧一次最多放入上限以内的数量，
-   返回值同时夹到不小于槽内当前数量（原版 `Slot#tryRemove` 会据此算 `上限 - 当前数量`）；
-2. `HopperBlockEntityMixin#tryMoveInItem`：保证漏斗传输的增量恒为非负
+因此本模组把"容器每格上限"的返回值**夹到不小于堆叠当前数量**，让那 6 处截断自然变成 no-op；
+同时另有两处要防止算出**负数增量**：
+
+1. `ContainerPolicy#capacityFor`（由 `InventoryMixin` 的两个覆写引用）：返回值永不小于
+   `stack.getCount()` —— 一处覆盖上面那 6 个截断点；
+2. `SlotMixin#getMaxStackSize(ItemStack)`：GUI 侧一次最多放入上限以内的数量，
+   返回值同样夹到不小于槽内当前数量（原版 `Slot#tryRemove` 会据此算 `上限 − 当前数量`）；
+3. `HopperBlockEntityMixin#tryMoveInItem`：保证漏斗传输的增量恒为非负
    （`ItemStack#split(负数)` / `grow(负数)` 会让数量朝**反方向**变化，可被用于复制物品）。
 
-正常情形下（当前数量不超过上限）这两处夹取不产生任何影响。
+正常情形下（当前数量不超过上限）这些夹取不产生任何影响。效果是**已有堆叠不会被回溯截断，
+容量只在"插入时"生效**——玩家背包本来就没有截断这一步，现在箱子与它行为一致。
 
-### 八、数量本身也要装得下：两处 8 位上限
+副作用是良性的：那些拿该返回值判断"还能不能合并 / 还剩多少空间"的原版逻辑
+（`Inventory`、`DispenserBlockEntity`、`SimpleContainer`、`AbstractContainerMenu` 等），
+会一致地把超量堆叠视为"已满"，增量也恒为非负。
 
-把上限抬到几千之后还有一件容易忽略的事：**原版存放数量的地方只有 8 位**，而且本代这两处
-都不经过 Codec，所以必须逐个处理，漏一个就会出现"数量错乱甚至整格消失"。
+### 八、数量本身也要装得下：本代的瓶颈是**校验型 Codec**
 
-| 路径 | 原版写法 | 截断后果 | 本模组的改法 |
-|---|---|---|---|
-| 网络包 | `FriendlyByteBuf#writeItem` 里 `writeByte(count)`；`readItem` 里 `readByte()` | 128 ~ 255 读成负数、256 的整数倍读成 0；`ItemStack#isEmpty()` 对 `count <= 0` 为 true，于是**整格物品消失**（打开箱子、拾取、GUI 点击都会触发整包同步） | `PacketByteBufMixin` 改成 `writeVarInt` / `readVarInt` |
-| 存档（区块、玩家数据、掉落物实体） | `ItemStack#save` 里 `putByte("Count", (byte) count)` | 同上；重进世界后数量错乱 | `ItemStackMixin` 在 `save` 的 TAIL 补一个 `putInt("Count")` 覆盖，并在 `of` 的 RETURN 用 `getInt` 还原 |
-
-**为什么读侧要用 `@ModifyVariable` 而不是等方法返回后再修**：原版拿到被截断的字节后会立刻
-`ItemStack.of(...)`；若截断值恰好是 0，这个栈已经成了空栈、物品信息丢失，
-返回后再改也救不回来。必须在"存进局部变量"那一步就把真实数量换回去。
-
-**兼容性**：VarInt 对 0 ~ 127 就是单个字节，取值与原 `writeByte` 完全一致；NBT 侧同理
-（`putInt(64)` 与 `putByte((byte) 64)` 读出来都是 64）。因此对端没装本模组时，只要数量没超过
-127 就仍能正确解析，不会错位；只有超过 127 才会不一致——而那本来也只有装了本模组才会出现。
-
-#### 附：还有一处不在字节层，但同样会让整摞物品消失——创造模式取物的 64 硬编码校验
-
-`ServerGamePacketListenerImpl#handleSetCreativeModeSlot` 里有一段防作弊校验（本代**直接写死 64**，
-字节码里是一次 `bipush 64`）：
+把上限抬到几千之后还有一件容易忽略的事：**数量在数据模型里也是有范围的**。本代原版把
+`ItemStack.CODEC` 的数量字段写成：
 
 ```java
-boolean valid = stack.isEmpty()
-        || stack.getDamageValue() >= 0 && stack.getCount() <= 64 && !stack.isEmpty();
+ExtraCodecs.intRange(1, 99).fieldOf("count").orElse(1)
 ```
 
-数量超过 64 的堆叠会被**静默丢弃**（既不 `setItem` 也不回包）。客户端因为本模组放大了
-`getMaxStackSize()`，点一下就是整整一摞、看起来成功；服务端却没接收。一打开箱子触发整包同步，
-客户端背包被服务端的真实状态覆盖，那一格就没了——**现象与上面两处字节截断完全一样，原因却完全不同**。
+`intRange` 是**校验型**编解码器——越界返回**错误**，而不是截断。所以"只放大
+`getMaxStackSize()` 而不动 Codec"的后果是：**数量超过 99 的物品根本存不下来**，
+而且**不会**像 1.20 一代那样悄悄变成另一个数量。
 
-1.20.5 起原版才把这里改成 `getCount() <= getMaxStackSize()`；本代需要用
-`ServerPlayNetworkHandlerMixin` 把那次 `getCount()` 替换成「是否超限」的哨兵值，
-等价地把 `count > 64` 改写成 `count > getMaxStackSize()`。
+| 路径 | 用到的编解码器 | 不处理会怎样 |
+|---|---|---|
+| 存档（区块、玩家背包、方块容器、掉落物实体） | `ItemStack.CODEC` / `OPTIONAL_CODEC` | 数量 > 99 时**编码失败**，物品保存不下去 |
+| 创造模式取物包 | `ItemStack.CODEC`（经 `validatedStreamCodec` 复校） | 未装本模组的一端会在解码时直接报错 |
+| 其它网络包 | `OPTIONAL_STREAM_CODEC` | **不受影响**——数量字段本来就是 `VarInt` |
 
-> 为什么不直接把常量 64 改掉：`bipush` 只能承载 -128 ~ 127，而 `global_max` 可以在游戏内
-> 随意调高，写死任何值都会在某个上限下重新失效。
+本模组的做法是在 `ItemStack` 静态初始化块末尾整体替换 `CODEC`，除把数量区间放开到
+`[1, Integer.MAX_VALUE]` 外，`id` 与 `components` 两项与原版**逐字一致**；同时把由它派生、
+**按值捕获**了旧实例的 `OPTIONAL_CODEC` 一并重建——不重建的话，创造模式保存的物品栏（热键栏）
+在编码时会失败，表现为该格被静默替换为空。
 
-### 九、与 Stackable 的对比：同类模组为何停在 127，本模组如何做到任意数量
+> **为什么不改传输层**：1.20.5 起网络里的数量已经是 `VarInt`，没有 8 位限制。所以 1.0.0
+> （1.20.1）里那两条"把 `writeByte` 改成 VarInt""给存档补写 `putInt`"的补丁在本代**全部作废**：
+> 它们的宿主方法在本代已经不存在，照搬会因找不到注入目标而在**启动时**报错——构建期不报错。
+
+**兼容性**：数量 ≤ 99 时与未装本模组的一端完全兼容（网络格式一致、Codec 区间也够用）。
+数量超过 99 时，**联机的两端都需要安装本模组**：未装的一端要么在解码创造模式取物包时报错，
+要么在保存含这类堆叠的容器时报错。
+
+### 九、与 Stackable 的对比：瓶颈从"有符号字节"换成了"校验型 Codec"
 
 [Stackable](https://github.com/Colin12345678910/Stackable) 的 README 里有一段很坦诚的解释：
 
 > Minecraft stores all items with a single signed byte which for our purposes only can be
 > between -128 to 127, since negative values are invalid that leaves a maximum stack size of 127.
-> Moreover, this mod is intended to be compatible with other mods which may also use signed
-> bytes to store items.
 >
 > As of Stackable 1.1.4 and Minecraft 1.20.5, this mod now can work with stack sizes above 127,
 > however, **for versions below 1.20.5, the following is still accurate.**
 
-这段话把问题说得很准：**127 不是设计选择，而是"有符号字节"的物理上限**；
-它同时点出了分水岭——**Minecraft 1.20.5**。
+这段话点出了分水岭——**Minecraft 1.20.5**，也正好是本分支所在的世代。
 
-#### 127 是怎么来的
+#### 1.20.5 之前：上限是"有符号字节"
 
-原版有两处把数量直接塞进**一个有符号字节**：
+原版把数量直接塞进一个字节（网络 `writeByte`、NBT `putByte("Count")`），单字节只能表达
+−128 ~ 127；而 `ItemStack#isEmpty()` 的判定是 `count <= 0`，所以数量越过 127 不是"变少"，
+而是**整格消失**。把上限设在 127，等于在不触碰编码格式的前提下，取编码能安全承载的最后一格。
 
-| 路径 | 原版写法 | 单字节能表达的范围 |
-|---|---|---|
-| 网络包 | `FriendlyByteBuf#writeItem` 里 `writeByte(stack.getCount())` | −128 ~ 127 |
-| 存档 NBT | `ItemStack#save` 里 `putByte("Count", (byte) count)` | 同上 |
+#### 1.20.5 起：序列化换成 Codec，但多了一个 99
 
-后果分三档：
+这一代起，物品的存档与网络改由 **Codec** 描述，数量字段是 `ExtraCodecs.intRange(1, 99)`。
+于是瓶颈换了个形式：不再有"整格消失"这种粗暴故障，但**数量 > 99 的物品直接存不下来**
+（`intRange` 是校验型的，越界返回错误而非截断），而且这个限制藏在数据模型里，
+不像单字节那样一眼看得出来。
 
-- **0 ~ 127**：正常；
-- **128 ~ 255**：读回来是**负数**（128 → −128，200 → −56）；
-- **256 的整数倍**：读回来是 **0**。
-
-而 `ItemStack#isEmpty()` 的判定正是 `count <= 0`——所以数量一旦越过 127，物品不是"变少"，
-而是**整格消失**。把上限设在 127，等于**在不触碰编码格式的前提下，取编码能安全承载的最后一格**。
-
-#### 分水岭为什么是 1.20.5
-
-1.20.5 起，原版把物品的网络与存档序列化**从手写字节流换成了 Codec**（`ItemStack.CODEC`），
-数量在数据模型里由 `rangedInt(1, 99)` 描述。Codec 是**自描述**的、范围写在模型里，
-因此只要重写那个范围就能放开上限——**完全不需要碰传输层的字节**。
-
-这正好解释了 Stackable 的两个时间点：它能突破 127 是在 1.20.5 及以后（自 1.1.4 起），
-而 1.20.5 之前不能——那一代原版还是手写字节流，数量就是一个 `writeByte`。
-
-#### 本模组改的是编码本身
-
-本模组的目标是 **1.20.1**——**没有 Codec 可改**的那一代。没有"等原版"这条路，
-于是只能自己把两条编码路径替换掉：
+#### 本模组在 1.21.1 上做的事
 
 | 层 | 原版 | 不处理会怎样 | 本模组 |
 |---|---|---|---|
-| 物品层上限 | `ItemStack#getMaxStackSize()` → 64 / 16 / 1 | 堆不过原版值 | 返回 `global_max`；带耐久物品与黑名单物品保持原版 |
-| 容器与槽位容量 | `Container#getMaxStackSize()` = 64 | 界面与插入逻辑仍按 64 | 按容器类型分别给值，**漏斗显式保持原版** |
-| **网络编码** | `writeByte` / `readByte`（8 位） | 数量 >127 即错乱 | `PacketByteBufMixin` 改为 **VarInt** |
-| **存档编码** | `putByte("Count")` / `getByte` | 存档里的数量被截断 | `ItemStackMixin` 在 `save` 的 TAIL 用 `putInt` **覆盖**，`of` 用 `getInt` 还原 |
-| 服务端校验 | 写死 `getCount() <= 64` | >64 静默丢弃 | 改写成"是否超过当前上限" |
+| 物品上限 | `ItemStack#getMaxStackSize()` → 64 / 16 / 1 | 堆不过原版值 | 返回 `global_max` |
+| 容器每格上限 | `Container#getMaxStackSize(ItemStack)` = `min(99, 物品上限)` | 界面与插入逻辑仍按 64 | 按容器类型分别给值，**漏斗显式保持原版** |
+| **存档 / 校验** | `ItemStack.CODEC` 的数量区间 `[1, 99]` | 数量 > 99 **保存失败** | 在 `<clinit>` 末尾整体替换 `CODEC`，区间放开到 `[1, Integer.MAX_VALUE]` |
+| 插入即截断 | `limitSize(this.getMaxStackSize(stack))`（共 6 处） | 调低上限时一次性销毁超量堆叠 | 容量返回值夹到不小于当前数量 |
 | 客户端 GUI | 镜像容器不被识别 | 显示与拖拽预览都按 64 | 登记镜像容器 |
-| 漏斗 | 64 停抽 | 红石计时器 / 计数器失效 | 显式保持原版 |
 
-关键只有**网络**与**存档**两条。这两条一旦解开，数量的存储与传输就与物品上限彻底无关了。
-
-#### 为什么用 VarInt，而不是直接换成 4 字节 int
-
-`writeItem` 是一条**位置相关**的二进制流：数量字段后面紧跟 NBT。若把 1 字节换成固定
-4 字节的 `writeInt`，包长度与字段偏移全部改变，**任何未装本模组的一端都会从 NBT 处开始错位**。
-
-VarInt 的价值正在于此：
-
-- 对 **0 ~ 127**，VarInt 恰好是一个字节，而且**逐位与原来的 `writeByte` 完全相同**；
-- 更大的值才逐级扩展（最多 5 字节，覆盖 32 位有符号范围）。
-
-也就是说，**数量在 127 以内时，本模组的包与原版逐字节一致**。没装本模组的一端读到小数量仍然完全
-正常；只有真的出现 >127 的数量才会不一致——而那本来也只有装了本模组才会产生。
-
-NBT 侧没有这个顾虑：NBT 是**自描述**格式（每个标签自带类型与长度），把 `Count` 由 ByteTag 换成
-IntTag 不会破坏结构。未装本模组的一端会把数量按低 8 位读（`getByte` 遇到 IntTag 会走
-`byteValue()`），数量偏小，但存档不会损坏。
-
-这也回应了 Stackable 自述里的另一层顾虑——它停在 127，还因为它希望与**其它同样用有符号字节
-存数量的模组**保持兼容。VarInt 恰好满足这一点：**小数量下逐位与原版相同**，按单字节解析的
-模组照常工作；只有真正出现大数量时才要求两端都装本模组。
+关键只有**存档与校验**这一条——它一旦解开，数量的存储就与物品上限彻底无关了。
 
 #### 那到底能堆到多少
 
-编码这一层已经不再是瓶颈：VarInt 与 NBT `int` 都是 32 位，理论上限约 **21.4 亿**。
-实际可用值由配置文件的 `global_max` 决定（默认 9999），可随时在游戏内用指令调整。
+物品组件与 Codec 都是 32 位，理论上限约 **21.4 亿**。实际可用值由配置文件的 `global_max`
+决定（默认 9999），可随时在游戏内用指令调整。
 
 #### 顺带一个定位上的差异
 
@@ -312,8 +274,7 @@ Stackable 是"把**所有**容器的堆叠上限一起抬高"；本模组默认�
 
 #### 前提
 
-数量 >127 时，**联机的两端都需要安装本模组**：只装一端的话，另一端仍按原版 8 位解析——
-网络包会从数量字段之后开始错位，而 NBT 侧只是数量偏小、不会崩。
+数量 > 99 时，**联机的两端都需要安装本模组**（见[第八节](#八数量本身也要装得下本代的瓶颈是校验型-codec)）。
 
 ---
 
@@ -323,14 +284,15 @@ Stackable 是"把**所有**容器的堆叠上限一起抬高"；本模组默认�
 
 | 加载器 | 前置 | 装哪个 jar |
 |---|---|---|
-| **Fabric** | [Fabric Loader](https://fabricmc.net/use/installer/) ≥ 0.14.22 + [Fabric API](https://modrinth.com/mod/fabric-api) | `BetterItemStack-1.20.1-fabric-<版本>.jar` |
-| **Forge** | [Forge](https://files.minecraftforge.net/net/minecraftforge/forge/) 47.x | `BetterItemStack-1.20.1-forge-<版本>.jar` |
-| **NeoForge** | NeoForge 47.1.x | `BetterItemStack-1.20.1-neoforge-<版本>.jar` |
+| **Fabric** | [Fabric Loader](https://fabricmc.net/use/installer/) ≥ 0.16.1 + [Fabric API](https://modrinth.com/mod/fabric-api) | `BetterItemStack-1.21.1-fabric-<版本>.jar` |
+| **Forge** | [Forge](https://files.minecraftforge.net/net/minecraftforge/forge/) 52.1.x | `BetterItemStack-1.21.1-forge-<版本>.jar` |
+| **NeoForge** | NeoForge 21.1.x | `BetterItemStack-1.21.1-neoforge-<版本>.jar` |
 
-把对应的 jar 放进 `.minecraft/mods/` 即可，运行时需要 **Java 17**。
+把对应的 jar 放进 `.minecraft/mods/` 即可，运行时需要 **Java 21**。
 
-> **关于 1.20.1 的 NeoForge**：这一代 NeoForge 是 Forge 47.x 的镜像（包名仍是
-> `net.minecraftforge`、模组 ID 仍是 `forge`），两份 jar 在运行期基本等价。**不要同时装两个。**
+> **关于 1.21.1 的 NeoForge**：这一代 NeoForge 已经是**独立实现**（包名是 `net.neoforged`、
+> 模组 ID 是 `neoforge`），与 Forge 产物**互不通用**——这与 1.20.1 时代"两者互为镜像、
+> 可以互换"正好相反。仍然**不要同时装两个。**
 
 ---
 
@@ -468,13 +430,14 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 | Minecraft | 结论 |
 |---|---|
-| **1.20.1** | ✅ 三平台各一份 |
-| 其它版本 | ❌ 不适用。1.20 一代的其它小版本未做验证；1.20.5 起原版结构换代（引入物品组件、数量走 Codec），本构建会因符号缺失而无法启动 |
+| **1.21.1** | ✅ 三平台各一份 |
+| 1.20.1 | ✅ 由 `1.20.1` 分支的 1.0.x 提供（那一代数量走手写字节流，机制与本分支不同） |
+| 其它版本 | ❌ 不适用。1.21 一代的其它小版本未做验证；1.20.4 及更早没有物品组件，本构建会因符号缺失而无法启动 |
 
-三平台产物的映射命名空间不同：Fabric 处于 **intermediary**，Forge / NeoForge 处于 **SRG**，
-运行期各自映射到当前版本的混淆名。**所以产物与编译目标是绑定的**——Mixin 的注入目标、
-`@Shadow` 成员这些符号一旦在目标版本里被改名或移除，就会以 `NoSuchMethodError` 或
-`Mixin apply failed` 直接失败。
+三平台产物的映射命名空间不同：Fabric 的产物处于 **intermediary**（构建时重映射），
+Forge / NeoForge 自 1.20.6 起**运行期就是官方命名**，产物无需再重混淆。
+**产物与编译目标始终是绑定的**——Mixin 的注入目标、`@Shadow` 成员这些符号一旦在目标版本里
+被改名或移除，就会以 `NoSuchMethodError` 或 `Mixin apply failed` 直接失败。
 
 ### `gradle.properties` 里的版本号分别管什么
 
@@ -482,15 +445,16 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 | 配置 | 玩家可见 | 作用 |
 |---|---|---|
-| `minecraft_version` | ✅ 进 `depends.minecraft` / `mods.toml` | 编译目标（1.20.1） |
+| `minecraft_version` | ✅ 进 `depends.minecraft` / `mods.toml` | 编译目标（1.21.1） |
 | `minecraft_version_range` | ✅ 同上 | 声明支持的区间 |
 | `fabric_loader_requires` | ✅ 进 `fabric.mod.json` 的 `depends.fabricloader` | Fabric 玩家门槛，取**能工作的最低版本** |
 | `forge_version_range` / `neoforge_version_range` | ✅ 进 `mods.toml` 的依赖段 | Forge / NeoForge 玩家门槛 |
 | `fabric_api_version` | ❌ | 编译期 Fabric API，决定"代码最多能用多新的 API" |
 | `fabric_loader_version` | ❌ | 编译期 Fabric Loader |
 | `forge_version` / `neoforge_version` | ❌ | 编译期的 Forge / NeoForge 版本 |
-| `loom_version` / `moddev_version` | ❌ | 构建插件的版本 |
-| `java_version` | ✅ 进元数据 | 编译目标（本代 = 17） |
+| `loom_version` / `moddev_version` / `forge_gradle_version` / `mixin_gradle_version` | ❌ | 构建插件的版本 |
+| `neo_form_version` | ❌ | 供 `common` 子项目独立编译用的 NeoForm 版本 |
+| `java_version` | ✅ 进元数据 | 编译目标（本代 = 21） |
 
 Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以门槛设低只会放宽、不会收紧。
 
@@ -517,7 +481,8 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
   - Loom `https://maven.fabricmc.net/net/fabricmc/fabric-loom/`
   - Loader `https://maven.fabricmc.net/net/fabricmc/fabric-loader/`
   - Forge `https://maven.minecraftforge.net/net/minecraftforge/forge/`
-  - NeoForge `https://maven.neoforged.net/releases/net/neoforged/forge/`（1.20.1 一代）
+  - NeoForge `https://maven.neoforged.net/releases/net/neoforged/neoforge/`（1.20.5 起；
+    1.20.1 一代的坐标是 `net/neoforged/forge/`）
 
 ---
 
@@ -532,13 +497,14 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
 4. 原版上限为 1 且不可损坏的物品（床、鞍、鱼桶、唱片等）会变为可堆叠。
    如不需要，请加入 `nonStackableItems`。
 5. 堆叠数量提示在数量 ≥ 1000 时显示；角标数字在 ≥ 1000 时缩写为 K / M / B。
-6. 本模组不提供物品上限数据表——原版上限直接读自物品（`Item#getMaxStackSize()`），对模组物品同样有效。
+6. 本模组不提供物品上限数据表——原版上限直接读自 `minecraft:max_stack_size` 物品组件，
+   对模组物品同样有效。
 7. **调低 `global_max` 不会销毁已有物品**：已经超过新上限的堆叠会原样保留，
    只是此后无法再把更多物品放进该格（GUI 侧一次最多放入新上限以内的数量）。
-   这与玩家背包的行为一致，详见[第七节](#七两处安全夹取防止调低上限时出现负数增量)。
-8. **数量在网络与存档里都不再受 8 位限制**：本代原版用字节存放数量，超过 127 会截断
-   （打开容器时表现为数量错乱甚至整格消失）。本模组把网络包与 NBT 两条路都改成 VarInt / int，
-   详见[第八节](#八数量本身也要装得下两处-8-位上限)。
+   这与玩家背包的行为一致，详见第七节。
+8. **数量不再受原版 99 的限制**：本代原版把数量区间写死在校验型 Codec 里（`intRange(1, 99)`），
+   数量超过 99 的物品**保存不下来**。本模组替换了该 Codec，详见第八节。
+9. **数量超过 99 时，联机的两端都要安装本模组**（见第八节）。
 
 ---
 
@@ -551,10 +517,8 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
 
 | Mixin | 改动的原版位置 |
 |---|---|
-| `ItemStackMixin` | `ItemStack#getMaxStackSize`、`save`、`of`、`getTooltipLines` |
-| `PacketByteBufMixin` | `FriendlyByteBuf#writeItem` 里的 `writeByte`（两个平台变体）、`readItem` 里的 `readByte` 与它存进的局部变量 |
-| `ServerPlayNetworkHandlerMixin` | `ServerGamePacketListenerImpl#handleSetCreativeModeSlot` 里的 `ItemStack#getCount()` |
-| `InventoryMixin` | `Container#getMaxStackSize` |
+| `ItemStackMixin` | `ItemStack` 的静态字段 `CODEC` / `OPTIONAL_CODEC`（`<clinit>`）、`getMaxStackSize`、`getTooltipLines` |
+| `InventoryMixin` | `Container#getMaxStackSize` 与 `#getMaxStackSize(ItemStack)` |
 | `SlotMixin` | `Slot#getMaxStackSize(ItemStack)` |
 | `ScreenHandlerMixin` | `AbstractContainerMenu#addSlot` |
 | `HopperBlockEntityMixin` | `HopperBlockEntity` 的 `isFullContainer`、`tryMoveInItem`、`inventoryFull`、`canMergeItems` 里的 `ItemStack#getMaxStackSize()` |
@@ -585,15 +549,15 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
 2. 只留本模组（+ 原版）跑一次，确认单独工作正常；
 3. 二分法把其它模组加回来，定位到具体哪一个。
 
-### 特别提示：本模组改动了网络与存档的编码
+### 特别提示：本模组替换了物品的 `ItemStack.CODEC`
 
-本代的原版把数量存成**有符号字节**，本模组必须替换两条编码路径
-（网络 `writeByte` → VarInt，NBT `putByte` → `putInt`，详见第九节）。由此带来两类额外风险：
+本代原版把数量区间写死在校验型 Codec 里（`intRange(1, 99)`），本模组在 `ItemStack` 的
+静态初始化块末尾整体替换了 `CODEC`（详见第八节）。由此带来两类额外风险：
 
-- **任何同样改动物品序列化的模组都必然冲突**——改的是同一段字节流的位置与长度，
-  不像上面那些可以靠"先执行者生效"勉强共存；
-- **联机时两端都要装本模组**：只装一端的话，数量一旦超过 127，未装的一端仍按原版单字节解析，
-  网络包会从数量字段之后开始错位（**数量 ≤127 时仍然完全兼容**）。
+- **任何同样替换或包装 `ItemStack.CODEC` 的模组都可能冲突**——两边各自持有自己的实例时，
+  后执行的那个生效，另一方的改动静默失效；
+- **数量 > 99 时联机两端都要装本模组**：只装一端的话，未装的一端会在创造模式取物包的解码
+  或容器保存时报错（**数量 ≤ 99 时仍然完全兼容**）。
 
 ---
 
@@ -605,20 +569,23 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
 ```bash
 ./gradlew build               # 构建三个平台的产物
 ./gradlew :fabric:build       # 只构建某一个平台
-./gradlew :forge:runClient    # 启动对应平台的开发环境客户端
-./gradlew :neoforge:runServer # 启动开发环境服务端
+./gradlew :fabric:runClient   # Fabric / NeoForge 的开发环境客户端
+./gradlew :neoforge:runServer # Fabric / NeoForge 的开发环境服务端
+./gradlew :forge:Client       # Forge 走 ForgeGradle，任务名没有 run 前缀
+./gradlew :forge:Server
 ```
 
 产物在各平台的 `build/libs/` 下：
 
-- `fabric/build/libs/BetterItemStack-1.20.1-fabric-<版本>.jar`
-- `forge/build/libs/BetterItemStack-1.20.1-forge-<版本>.jar`
-- `neoforge/build/libs/BetterItemStack-1.20.1-neoforge-<版本>.jar`
+- `fabric/build/libs/BetterItemStack-1.21.1-fabric-<版本>.jar`
+- `forge/build/libs/BetterItemStack-1.21.1-forge-<版本>.jar`
+- `neoforge/build/libs/BetterItemStack-1.21.1-neoforge-<版本>.jar`
 
-> Forge / NeoForge 的 `build/libs` 是**已重混淆**的发布产物，可以直接分发；
-> 未重混淆的那份在 `build/devlibs/`，只用于本地调试，不要分发。
+> Fabric 下还会有一份 `-dev.jar` 落在 `build/devlibs/`，那是**未重映射**的中间产物，
+> 只用于本地调试，不要分发。Forge 侧设了 `reobf = false`（本代运行期就是官方命名），
+> 因此只有 `build/libs` 一份。
 
-构建环境：Gradle 8.14.2 + JDK 21（`java_version = 17` 是编译目标，与运行 Gradle 的 JDK 无关）。
+构建环境：Gradle 8.14.2 + JDK 21（`java_version = 21` 是编译目标，与运行 Gradle 的 JDK 无关）。
 不生成 `-sources.jar`。push / PR 会触发 GitHub Actions 构建，产物作为 Artifacts 上传（保留 90 天）。
 
 ### 发布新版本
@@ -655,15 +622,13 @@ common/                                  平台无关的全部逻辑与资源
 │   ├── BetterItemStack.java             核心入口：配置加载、/bis 指令（输出走翻译键）
 │   ├── Config.java                      配置读写与静态 global_max
 │   ├── ContainerPolicy.java             容器分类：是否提升、物品层上限、格子层上限
-│   ├── VanillaMax.java                  读取"原版上限"（读 Item#getMaxStackSize()，不受本模组改写影响）
+│   ├── VanillaMax.java                  读取"原版上限"（读 max_stack_size 组件，不受本模组改写影响）
 │   ├── platform/
 │   │   ├── Platform.java                平台抽象（配置目录 / 模组版本号）
 │   │   └── Platforms.java               经 ServiceLoader 惰性解析实现
 │   └── mixin/
-│       ├── ItemStackMixin.java          物品上限、落盘数量、堆叠数量提示
-│       ├── PacketByteBufMixin.java      网络包里的数量改用 VarInt
-│       ├── ServerPlayNetworkHandlerMixin.java  创造模式取物的上限校验（本代原版写死 64）
-│       ├── InventoryMixin.java          容器每格上限按类型区分
+│       ├── ItemStackMixin.java          替换 CODEC、物品上限、堆叠数量提示
+│       ├── InventoryMixin.java          容器每格上限按类型区分（并抵消原版的"插入即截断"）
 │       ├── SlotMixin.java               GUI 槽位容量（保留槽位自身声明的上限）
 │       ├── ScreenHandlerMixin.java      客户端镜像容器登记
 │       ├── HopperBlockEntityMixin.java  漏斗容量判定接回容器感知逻辑
@@ -671,14 +636,14 @@ common/                                  平台无关的全部逻辑与资源
 │       └── client/DrawContextMixin.java 角标数字缩写
 └── src/main/resources/
     ├── icon.png                         模组图标（三平台共用，也是仓库 README 的图）
-    ├── betteritemstack.mixins.json      8 个公共 mixin + 1 个客户端专属
+    ├── betteritemstack.mixins.json      6 个公共 mixin + 1 个客户端专属
     ├── pack.mcmeta
     └── assets/betteritemstack/
         └── lang/                        10 种语言
 
 fabric/                                  Fabric 入口 + fabric.mod.json + Platform 实现
-forge/                                   Forge 入口 + META-INF/mods.toml + Platform 实现
-neoforge/                                NeoForge 入口 + META-INF/mods.toml + Platform 实现
+forge/                                   Forge 入口（ForgeGradle）+ META-INF/mods.toml + Platform 实现
+neoforge/                                NeoForge 入口（ModDevGradle）+ META-INF/neoforge.mods.toml + Platform 实现
 
 buildSrc/                                两个约定插件
 ├── multiloader-common.gradle            公共配置：产物名 / 工具链 / jar manifest / 资源占位符替换
@@ -702,8 +667,8 @@ gradle.properties                        所有版本号与元数据的唯一来
 - [Staaaaaaaaaaaack](https://modrinth.com/mod/staaaaaaaaaaaack) — 在物品实体生成前完成合并，
   并优化了背包爆炸运算，与本模组搭配效果良好
 - [Stackable](https://github.com/Colin12345678910/Stackable) — 同类堆叠模组。它自述在 1.20.5
-  之前受"有符号字节"的物理限制，只能堆到 127；本模组则在同样的 1.20 一代上自己改写了
-  编码层。两者的技术路线对比见上文第九节。
+  之前受"有符号字节"的物理限制只能堆到 127，1.20.5 起才突破；本模组的两个分支各自解决了
+  其中一代的问题。两者的技术路线对比见上文第九节。
 
 ### 语言
 

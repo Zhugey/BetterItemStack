@@ -184,8 +184,10 @@ public final class BetterItemStack {
      * <p>由各平台入口在合适的时机调用（Fabric 是 {@code CommandRegistrationCallback}，
      * Forge / NeoForge 是 {@code RegisterCommandsEvent}）。
      *
-     * <p>权限判定统一用 {@code CommandSourceStack#hasPermission(1)}（= OP 等级 1）；
-     * 官方映射下三个平台同名同义，因此不需要再做平台分支。
+     * <p>权限判定统一用 {@code Commands#hasPermission(Commands#LEVEL_MODERATORS)}
+     * （= 旧 API 的 OP 等级 1）。1.21.9 起原版把 {@code CommandSourceStack#hasPermission(int)}
+     * 换成了 {@code PermissionSet} / {@code PermissionLevel} 体系，等级 1 对应
+     * {@code PermissionLevel.MODERATORS}；新 API 三个平台同名同义，因此不需要平台分支。
      *
      * @param dispatcher 游戏的命令分发器
      */
@@ -206,12 +208,12 @@ public final class BetterItemStack {
                         .executes(BetterItemStack::executeInfo))
                 // /bis set <global_max>
                 .then(Commands.literal("set")
-                        .requires(source -> source.hasPermission(1))
+                        .requires(Commands.hasPermission(Commands.LEVEL_MODERATORS))
                         .then(Commands.argument("global_max", IntegerArgumentType.integer())
                                 .executes(BetterItemStack::executeSet)))
                 // /bis reload
                 .then(Commands.literal("reload")
-                        .requires(source -> source.hasPermission(1))
+                        .requires(Commands.hasPermission(Commands.LEVEL_MODERATORS))
                         .executes(BetterItemStack::executeReload))
         );
     }

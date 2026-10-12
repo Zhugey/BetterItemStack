@@ -10,8 +10,9 @@ import net.minecraft.world.level.block.entity.DropperBlockEntity;
 import net.minecraft.world.level.block.entity.HopperBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.vehicle.MinecartChest;
-import net.minecraft.world.entity.vehicle.MinecartHopper;
+// 1.21.2 起矿车实体被归入 vehicle.minecart 子包（原为 vehicle）。
+import net.minecraft.world.entity.vehicle.minecart.MinecartChest;
+import net.minecraft.world.entity.vehicle.minecart.MinecartHopper;
 import net.minecraft.world.CompoundContainer;
 import net.minecraft.world.inventory.PlayerEnderChestContainer;
 import net.minecraft.world.Container;

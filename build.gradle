@@ -2,13 +2,16 @@
 // 各子项目按需应用：
 //   - fabric   → fabric-loom（官方映射）
 //   - common   → ModDevGradle（NeoForm 模式，只拿带官方映射的 vanilla Minecraft）
-//   - neoforge → ModDevGradle（真 NeoForge，1.21.1 起与 Forge 是两套独立实现）
+//   - neoforge → ModDevGradle（真 NeoForge，1.20.5 起与 Forge 是两套独立实现）
 //   - forge    → 经典 ForgeGradle（ModDevGradle 的 legacyforge 只覆盖 1.17 – 1.20.1）
+// ⚠ 本分支**没有** Sponge 的 Mixin Gradle 插件：它到 0.7.38 都用着 Gradle 9 已删除的
+//   org.gradle.util.VersionNumber，装不上；而 ForgeGradle 7 又要求 Gradle ≥ 9.3。
+//   Forge 官方 FG7 示例同样已弃用它 ⇒ 混入改由 forge/build.gradle 手工接
+//   （mixin AP + jar 清单 MixinConfigs + 运行参数 --mixin.config）。
 plugins {
     id 'fabric-loom' version "${loom_version}" apply false
     id 'net.neoforged.moddev' version "${moddev_version}" apply false
     id 'net.minecraftforge.gradle' version "${forge_gradle_version}" apply false
-    id 'org.spongepowered.mixin' version "${mixin_gradle_version}" apply false
 }
 
 // 所有子项目统一 group / version。

@@ -1,31 +1,31 @@
 // ===========================================================================
-// forge —— MinecraftForge 1.21.1（经典 ForgeGradle）
+// forge —— MinecraftForge 1.21.11（ForgeGradle 7）
 //
-// 为什么 1.21.1 不能沿用 1.20.1 那套 ModDevGradle legacyforge：
-//   - MDG 的 legacyforge 变体只覆盖 1.17 – 1.20.1（它依赖的 MCP 也没有 1.21.1 版本）；
-//   - 因此这里必须回到经典 ForgeGradle + Sponge 的 Mixin Gradle 插件。
+// 为什么 1.21 一代不能用 ModDevGradle legacyforge：
+//   - MDG 的 legacyforge 变体只覆盖 1.17 – 1.20.1（它依赖的 MCP 也没有 1.21 版本）。
 //
-// 好消息是 1.21.1 反而更简单：**1.20.6 起 Forge 运行期就是官方命名**，
-//   - `reobf = false`：不再需要 official → SRG 的重混淆，build/libs 里的就是成品；
-//   - 不再需要 refmap：名字在运行期直接匹配。
+// ⚠ 1.21.11 相对 1.21.1 的三处硬变化（均在 Forge 官方 MDK / MDKExamples 上核对过）：
+//   1. **ForgeGradle 必须升到 7.x**（MDK 写的是 `[7.0.3,8)`），而 FG7 **要求 Gradle ≥ 9.3.0**
+//      ⇒ 本分支 wrapper 从 8.14.2 升到 9.4.1（连带上 Loom 1.15、mixin 插件 0.7.38 → 干脆去掉）。
+//   2. **不再使用 Sponge 的 Mixin Gradle 插件**。它（含 0.7-SNAPSHOT 与 0.7.38）在 Gradle 9 下
+//      会因用到已删除的 `org.gradle.util.VersionNumber` 而无法创建 MixinExtension；
+//      Forge 官方 FG7 示例也已不用它。改由本脚本手工承担它原来的两件事：
+//        - 混入 AP：`annotationProcessor 'org.spongepowered:mixin:0.8.7:processor'`
+//        - 运行期混入配置：jar 清单的 `MixinConfigs` + 运行参数 `--mixin.config=...`
+//   3. FG7 的运行配置改用 `register('client' / 'server' / 'data')`，任务名随之变成
+//      `runClient` / `runServer` / `runData`（与 Fabric / NeoForge 统一，不再叫 `Client` / `Server`）。
+//
+// 不变的好消息：**1.20.6 起 Forge 运行期就是官方命名** ⇒ 不需要重混淆、也不需要 refmap，
+//   `build/libs` 里的就是成品。
 // ===========================================================================
 plugins {
     id 'multiloader-loader'
     id 'net.minecraftforge.gradle'
-    id 'org.spongepowered.mixin'
 }
 
-mixin {
-    config "${mod_id}.mixins.json"
-}
-
-// ⚠ 这一条必须手写，不能指望混入插件自动加。
-// 实测：mixingradle 0.7-SNAPSHOT 的 addMixinsToJar 只会把 refmap 名字回填进 jar 内的
-// mixins.json，**不会**往 MANIFEST 里写 MixinConfigs；而 1.21.1 的 Forge 侧
-// （与 NeoForge 不同）既不认 mods.toml 的 [[mixins]]，自身 FML 里也搜不到任何
-// "MixinConfigs"/"mixins" 常量 —— 它读混入配置的唯一入口就是 jar 清单的这个属性。
-// 缺了它，构建全绿、进游戏后混入静默不生效。
-// （对照：1.20.1 分支用 MDG legacyforge，那份产物 MANIFEST 里是插件自动写上的。）
+// 正式环境靠这条：FML 读混入配置的唯一入口就是 jar 清单的这个属性
+//（Forge 侧既不认 mods.toml 的 [[mixins]]，自身也没有任何 "MixinConfigs" 常量）。
+// 缺了它，构建全绿、进游戏后混入静默不生效。FG7 官方示例就是这么写的。
 jar {
     manifest {
         attributes["MixinConfigs"] = "${mod_id}.mixins.json"
@@ -35,72 +35,71 @@ jar {
 minecraft {
     mappings channel: 'official', version: minecraft_version
 
-    // 在 IDE 里从 build 目录跑时，先把资源处理一遍。
-    copyIdeResources = true
-
-    // 见文件头：1.20.6 起 Forge 运行期用官方命名，不需要重混淆。
-    reobf = false
-
+    // FG7 的 runs 用 register(...)，任务名随之变成 runClient / runServer / runData
+    //（FG6 时代是 runs { client { taskName 'Client' } } → 叫 Client / Server）。
     runs {
-        client {
-            workingDirectory file('run')
-            ideaModule "${rootProject.name}.${project.name}.main"
-            taskName 'Client'
-            mods {
-                modClientRun {
-                    source sourceSets.main
-                }
-            }
-        }
-        server {
-            workingDirectory file('run')
-            ideaModule "${rootProject.name}.${project.name}.main"
-            taskName 'Server'
-            mods {
-                modServerRun {
-                    source sourceSets.main
-                }
-            }
-        }
-        data {
-            workingDirectory file('run')
-            ideaModule "${rootProject.name}.${project.name}.main"
-            args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
-            taskName 'Data'
-            mods {
-                modDataRun {
-                    source sourceSets.main
-                }
-            }
-        }
-    }
+        configureEach {
+            // ⚠ FG7 这里改了名与类型：FG6 是 `workingDirectory file('run')`，
+            //   FG7 是 `workingDir`（DirectoryProperty，必须用 = 或 .convention 赋 Provider）。
+            workingDir = layout.projectDirectory.dir('run')
 
-    // 控制台中文乱码修复（forge / neoforge 同因同解，fabric 不受影响，理由见下）。
-    //
-    // 症状：IDE 或 Gradle 的运行控制台里中文全是乱码，但游戏内显示正常、logs/latest.log 也正常。
-    // 成因：Forge 侧运行时的 console appender 不是 log4j2 自带的 ConsoleAppender，而是 FML
-    //   log4j2.xml 里的 net.minecrell TerminalConsoleAppender。后者的 append() 无条件调用
-    //   System.out.print(String)，于是输出编码 = JVM 的 stdout.encoding；而 JDK 18 起
-    //   （JEP 400）stdout.encoding 在「未连控制台」（IDE / Gradle 都是管道）时回落到
-    //   native.encoding —— 中文 Windows 即 GBK。IDE 控制台按 UTF-8 解码 GBK 字节 ⇒ 乱码。
-    //   游戏内不经过 stdout、日志文件走 log4j2 的 File appender（字节由 Layout 编码，默认
-    //   UTF-8）⇒ 那两处都正常，只有控制台坏。fabric 不用这个 appender（走 log4j2 原生
-    //   ConsoleAppender，同样写 Layout 的 UTF-8 字节）⇒ 它本来就不乱码。
-    // ⚠ 只加 -Dfile.encoding=UTF-8 无效（实测：JDK 18 起 file.encoding 不再决定 stdout 的编码，
-    //   本机默认它就是 UTF-8 而 stdout 仍是 GBK）。必须显式设 stdout.encoding / stderr.encoding。
-    runs.all { cfg ->
-        cfg.property 'stdout.encoding', 'UTF-8'
-        cfg.property 'stderr.encoding', 'UTF-8'
+            // 开发环境靠这条参数加载混入配置 —— 原来由 Sponge 插件自动注入，
+            // 插件移除后必须自己加（FG7 官方示例同样如此）。
+            args "--mixin.config=${mod_id}.mixins.json"
+
+            // 控制台中文乱码修复（forge / neoforge 同因同解，fabric 不受影响）。
+            // 成因：Forge 侧的 console appender 是 FML log4j2.xml 里的 net.minecrell
+            //   TerminalConsoleAppender，它的 append() 无条件 System.out.print(String)，
+            //   于是输出编码 = JVM 的 stdout.encoding；而 JDK 18 起（JEP 400）该值在
+            //   「未连控制台」（IDE / Gradle 都是管道）时回落到 native.encoding
+            //   —— 中文 Windows 即 GBK，IDE 按 UTF-8 解码 ⇒ 乱码。游戏内与 logs/latest.log
+            //   都不经过 stdout ⇒ 正常；fabric 走 log4j2 原生 ConsoleAppender，同样不受影响。
+            // ⚠ 只加 -Dfile.encoding=UTF-8 无效（实测），必须显式设 stdout / stderr.encoding。
+            // ⚠ FG7 把 FG6 的 `property(...)` 改名为 `systemProperty(...)`。
+            systemProperty 'stdout.encoding', 'UTF-8'
+            systemProperty 'stderr.encoding', 'UTF-8'
+        }
+
+        register('client')
+
+        register('server') {
+            args '--nogui'
+        }
+
+        register('data') {
+            args '--mod', mod_id, '--all',
+                    '--output', file('src/generated/resources/'),
+                    '--existing', file('src/main/resources/')
+        }
     }
 }
 
 sourceSets.main.resources.srcDir 'src/generated/resources'
 
+// ⚠ 本分支**不接混入 AP**，原因链：
+//   1. 本代 Forge 运行期是官方命名 ⇒ **不需要 refmap**；
+//   2. 但 AP 默认会去生成 refmap，找不到混淆映射就直接报错：
+//      `错误: Unable to locate obfuscation mapping for @Inject target getMaxStackSize`；
+//   3. 原先喂映射给 AP 的是 Sponge 的 MixinGradle 插件 —— 它在 Gradle 9 下不可用、已移除；
+//   4. 改共享的 mixins.json 去掉 refmap 键也不行：fabric 侧必须保留它（产物要重映射到 intermediary）；
+//      传 `-AdisableTargetExport/-AdisableTargetValidator` 实测也无效（选项名不对或该版本不认）。
+//   代价：失去 AP 的编译期目标校验。可以接受 —— 本项目对混入的判据本来就是「启动日志」
+//   而非构建期（见 MEMORY：构建全绿 ≠ 混入生效，只有 run/logs/latest.log 算数）。
+// TODO(1.21.11)：若将来查清 Mixin 0.8.7 AP 的正确选项名，可在保留 AP 的同时关掉 refmap 生成。
+
+repositories {
+    // FG7 不再隐式注册这几个仓库，必须显式声明（与官方示例一致）。
+    minecraft.mavenizer(it)
+    maven fg.forgeMaven
+    maven fg.minecraftLibsMaven
+}
+
 dependencies {
-    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-    // 必须是 -SNAPSHOT：0.8.5 正式版的 CompatibilityLevel 枚举最高只到 JAVA_18，
-    // 而本项目 mixins.json 写的是 JAVA_21（1.20.5 分支已实测通过的值）。
-    annotationProcessor 'org.spongepowered:mixin:0.8.5-SNAPSHOT:processor'
+    // ⚠ FG7 换了依赖 DSL：FG6 的 `minecraft "net.minecraftforge:forge:..."` 已不存在，
+    //   改为扩展方法 `minecraft.dependency(...)`（官方示例同款）。
+    //   它返回的是 FG 的 patcher 依赖，会走 FG 的 userdev 处理流程。
+    implementation minecraft.dependency("net.minecraftforge:forge:${minecraft_version}-${forge_version}")
+    // 见上方说明：本分支刻意不加 mixin 注解处理器。
 
     // Forge 自带的 hack 修复：强制 jopt-simple 用 5.0.4（见 Forge 官方 MDK）。
     implementation('net.sf.jopt-simple:jopt-simple:5.0.4') { version { strictly '5.0.4' } }

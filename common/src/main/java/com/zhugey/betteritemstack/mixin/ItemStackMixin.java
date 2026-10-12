@@ -101,9 +101,12 @@ public abstract class ItemStackMixin {
      * {@code OPTIONAL_CODEC} 都已初始化完毕，直接整体替换即可，
      * 不必去改原版那段 {@code RecordCodecBuilder} 的源码。</p>
      *
-     * <p>除数量字段外，id 与 components 两项都沿用原版的写法：
-     * {@code ITEM_NON_AIR_CODEC}（公开静态字段，原版 {@code CODEC} 用的就是它）
-     * 与 {@code getComponentsPatch()}（公开方法，等价于原版内联的 {@code components.asPatch()}）。</p>
+     * <p>除数量字段外，id 与 components 两项都沿用原版的语义：
+     * id 用 {@code BuiltInRegistries.ITEM.holderByNameCodec()}（也就是"按注册名解析成
+     * {@code Holder<Item>}"，与原版 1.21.1 里那个 {@code ITEM_NON_AIR_CODEC} 同源——
+     * 后者在 1.21.9 起已被移除，不再是公开字段），
+     * components 用 {@code getComponentsPatch()}（公开方法，等价于原版内联的
+     * {@code components.asPatch()}）。</p>
      *
      * <p><b>方法名写 {@code "<clinit>"}，不要补 {@code ()V}</b>：补了描述符之后 Mixin 注解处理器
      * 会去类的方法表里找 {@code "<clinit>()V"}，静态初始化块不在其中，于是报
@@ -117,7 +120,8 @@ public abstract class ItemStackMixin {
         CODEC = Codec.lazyInitialized(
                 () -> RecordCodecBuilder.create(
                         instance -> instance.group(
-                                        ItemStack.ITEM_NON_AIR_CODEC.fieldOf("id").forGetter(ItemStack::getItemHolder),
+                                        BuiltInRegistries.ITEM.holderByNameCodec()
+                                                .fieldOf("id").forGetter(ItemStack::getItemHolder),
                                         ExtraCodecs.intRange(1, Integer.MAX_VALUE).fieldOf("count").orElse(1)
                                                 .forGetter(ItemStack::getCount),
                                         DataComponentPatch.CODEC

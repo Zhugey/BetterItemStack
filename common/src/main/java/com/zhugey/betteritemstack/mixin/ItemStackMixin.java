@@ -1,6 +1,7 @@
 package com.zhugey.betteritemstack.mixin;
 
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.zhugey.betteritemstack.Config;
 import net.minecraft.ChatFormatting;
@@ -73,6 +74,24 @@ public abstract class ItemStackMixin {
     /** 堆叠数量达到该值时才在工具提示中显示数量。 */
     private static final int BIS_TOOLTIP_THRESHOLD = 1000;
 
+    /**
+     * 原版 {@link ItemStack#MAP_CODEC} —— 本代（1.21.9 起）{@code ItemStack} 编解码结构的<b>根</b>。
+     *
+     * <p><b>这是本代与 1.21.1 最重要的结构差别</b>：1.21.1 里 {@code CODEC} 是直接由
+     * {@code RecordCodecBuilder.create(...)} 构造的源头；本代改成
+     * {@code MAP_CODEC = MapCodec.recursive("ItemStack", ...)} 作根，{@code CODEC} 反过来由它派生
+     * （{@code Codec.lazyInitialized(MAP_CODEC::codec)}）。</p>
+     *
+     * <p><b>所以数量上限必须从这个字段下手</b>：容器侧（{@code ItemStackWithSlot.CODEC} ——
+     * 箱子的 {@code "Items"} 列表就是它）<b>直接引用 {@code MAP_CODEC}</b>，
+     * 只替换 {@code CODEC} 对它完全无效。症状是箱子/背包里的堆叠<b>落盘</b>时报
+     * {@code Value must be within range [1;99]}，物品根本保存不下来。</p>
+     */
+    @Mutable
+    @Shadow
+    @Final
+    public static MapCodec<ItemStack> MAP_CODEC;
+
     /** 原版 {@link ItemStack#CODEC} 的静态实例，待 {@link #bis$allowLargeCounts} 整体替换。 */
     @Mutable
     @Shadow
@@ -94,6 +113,18 @@ public abstract class ItemStackMixin {
     public static Codec<ItemStack> OPTIONAL_CODEC;
 
     /**
+     * 原版 {@code CODEC.validate(ItemStack::validateStrict)} —— 严格校验版。
+     *
+     * <p>它的校验条件是 {@code getCount() > getMaxStackSize()}，而 {@code getMaxStackSize()}
+     * 已被本模组放大，所以校验本身不会拦大堆叠；<b>真正的问题是它派生自旧 {@code CODEC}</b>，
+     * 数量字段仍卡在 {@code [1,99]}。必须一并重建。</p>
+     */
+    @Mutable
+    @Shadow
+    @Final
+    public static Codec<ItemStack> STRICT_CODEC;
+
+    /**
      * <p>重写 {@link ItemStack#CODEC}，把数量字段的取值上限由原版的 {@code [1, 99]}
      * 放开到 {@code [1, Integer.MAX_VALUE]}。</p>
      *
@@ -101,10 +132,15 @@ public abstract class ItemStackMixin {
      * {@code OPTIONAL_CODEC} 都已初始化完毕，直接整体替换即可，
      * 不必去改原版那段 {@code RecordCodecBuilder} 的源码。</p>
      *
-     * <p>除数量字段外，id 与 components 两项都沿用原版的语义：
-     * id 用 {@code BuiltInRegistries.ITEM.holderByNameCodec()}（也就是"按注册名解析成
-     * {@code Holder<Item>}"，与原版 1.21.1 里那个 {@code ITEM_NON_AIR_CODEC} 同源——
-     * 后者在 1.21.9 起已被移除，不再是公开字段），
+     * <p><b>本代 {@code ItemStack} 的编解码结构比 1.21.1 多了一层</b>：{@link #MAP_CODEC}
+     * 才是根（{@code MapCodec.recursive}），{@link #CODEC} 反过来由它派生。
+     * 因此这里以 {@code MAP_CODEC} 为主改，并把由它派生的 {@link #CODEC}、
+     * {@link #STRICT_CODEC}、{@link #OPTIONAL_CODEC} 一并重建。</p>
+     *
+     * <p>除数量字段外，id 与 components 两项与原版逐字一致：
+     * id 用 {@code Item.CODEC}（其定义是 {@code holderByNameCodec().validate(非空气)}，
+     * 与原版 1.21.1 里那个 {@code ITEM_NON_AIR_CODEC} 同源；后者自 1.21.9 起不再是公开字段。
+     * ⚠ <b>不要图省事直接写 {@code holderByNameCodec()}</b> —— 那会丢掉"非空气"校验），
      * components 用 {@code getComponentsPatch()}（公开方法，等价于原版内联的
      * {@code components.asPatch()}）。</p>
      *
@@ -117,11 +153,13 @@ public abstract class ItemStackMixin {
      */
     @Inject(method = "<clinit>", at = @At("TAIL"))
     private static void bis$allowLargeCounts(CallbackInfo ci) {
-        CODEC = Codec.lazyInitialized(
-                () -> RecordCodecBuilder.create(
+        // ① 先换"根"：MAP_CODEC 是本代数量上限的唯一源头，其余 codec 都从它派生。
+        //    三个字段除数量区间外与原版逐字一致（含 id 用 Item.CODEC 而非裸 holderByNameCodec）。
+        MAP_CODEC = MapCodec.recursive(
+                "ItemStack",
+                self -> RecordCodecBuilder.mapCodec(
                         instance -> instance.group(
-                                        BuiltInRegistries.ITEM.holderByNameCodec()
-                                                .fieldOf("id").forGetter(ItemStack::getItemHolder),
+                                        Item.CODEC.fieldOf("id").forGetter(ItemStack::getItemHolder),
                                         ExtraCodecs.intRange(1, Integer.MAX_VALUE).fieldOf("count").orElse(1)
                                                 .forGetter(ItemStack::getCount),
                                         DataComponentPatch.CODEC
@@ -132,7 +170,15 @@ public abstract class ItemStackMixin {
                 )
         );
 
-        // 重建派生版本，否则它仍按值持有上面那个"数量最多 99"的旧实例。
+        // ② 以下三个都必须用新根重建。原版它们是"按值捕获"派生出来的
+        //    （CODEC 由 Codec.lazyInitialized(MAP_CODEC::codec) 捕获了当时的实例），
+        //    只换字段不会让它们跟着变：
+        //        CODEC          = MAP_CODEC::codec
+        //        STRICT_CODEC   = CODEC.validate(validateStrict)
+        //        OPTIONAL_CODEC = optionalEmptyMap(CODEC).xmap(...)
+        //    ⚠ 漏掉任何一个，对应那条落盘/存档路径上超过 99 的堆叠都会报 [1;99] 存不下来。
+        CODEC = Codec.lazyInitialized(MAP_CODEC::codec);
+        STRICT_CODEC = CODEC.validate(ItemStack::validateStrict);
         OPTIONAL_CODEC = ExtraCodecs.optionalEmptyMap(CODEC)
                 .xmap(optional -> optional.orElse(ItemStack.EMPTY),
                         stack -> stack.isEmpty() ? Optional.empty() : Optional.of(stack));

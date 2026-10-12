@@ -100,7 +100,8 @@ processResources {
     filesMatching(['fabric.mod.json', 'pack.mcmeta', '*.mixins.json']) {
         expand expandProps
     }
-    filesMatching(['META-INF/mods.toml']) {
+    // Forge 用 mods.toml；NeoForge 1.20.5 起改用 neoforge.mods.toml。
+    filesMatching(['META-INF/mods.toml', 'META-INF/neoforge.mods.toml']) {
         expand expandProps
     }
 }

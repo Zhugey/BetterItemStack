@@ -2,15 +2,16 @@ package com.zhugey.betteritemstack.neoforge;
 
 import com.zhugey.betteritemstack.BetterItemStack;
 import com.zhugey.betteritemstack.platform.Platform;
-import net.minecraftforge.fml.ModList;
-import net.minecraftforge.fml.loading.FMLPaths;
+import net.neoforged.fml.ModList;
+import net.neoforged.fml.loading.FMLPaths;
 
 import java.nio.file.Path;
 
 /**
- * NeoForge 1.20.1 侧的 {@link Platform} 实现。
+ * NeoForge 1.21.1 侧的 {@link Platform} 实现。
  *
- * <p>1.20.1 的 NeoForge 沿用 {@code net.minecraftforge} 包名，API 与 Forge 相同。
+ * <p>1.20.5 起 NeoForge 独立实现，API 位于 {@code net.neoforged.*}（不再是 1.20.1 的
+ * {@code net.minecraftforge.*} 镜像）。
  */
 public final class NeoForgePlatform implements Platform {
 

@@ -1,8 +1,14 @@
 // 根项目只负责声明平台插件的版本，不应用到自身（apply false）。
-// 各子项目按需应用：fabric 用 fabric-loom，common / forge / neoforge 用 ModDevGradle legacyforge。
+// 各子项目按需应用：
+//   - fabric   → fabric-loom（官方映射）
+//   - common   → ModDevGradle（NeoForm 模式，只拿带官方映射的 vanilla Minecraft）
+//   - neoforge → ModDevGradle（真 NeoForge，1.21.1 起与 Forge 是两套独立实现）
+//   - forge    → 经典 ForgeGradle（ModDevGradle 的 legacyforge 只覆盖 1.17 – 1.20.1）
 plugins {
     id 'fabric-loom' version "${loom_version}" apply false
-    id 'net.neoforged.moddev.legacyforge' version "${moddev_version}" apply false
+    id 'net.neoforged.moddev' version "${moddev_version}" apply false
+    id 'net.minecraftforge.gradle' version "${forge_gradle_version}" apply false
+    id 'org.spongepowered.mixin' version "${mixin_gradle_version}" apply false
 }
 
 // 所有子项目统一 group / version。

@@ -4,6 +4,7 @@ import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BrewingStandBlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.CrafterBlockEntity;
 import net.minecraft.world.level.block.entity.DispenserBlockEntity;
 import net.minecraft.world.level.block.entity.DropperBlockEntity;
 import net.minecraft.world.level.block.entity.HopperBlockEntity;
@@ -71,7 +72,8 @@ public final class ContainerPolicy {
             "dropper",
             "dispenser",
             "furnace",
-            "brewing_stand"
+            "brewing_stand",
+            "crafter"
     );
 
     /**
@@ -143,6 +145,9 @@ public final class ContainerPolicy {
         }
         if (type == MenuType.GENERIC_3x3) {
             return "dispenser";
+        }
+        if (type == MenuType.CRAFTER_3x3) {
+            return "crafter";
         }
         if (type == MenuType.FURNACE
                 || type == MenuType.BLAST_FURNACE
@@ -231,9 +236,9 @@ public final class ContainerPolicy {
         if (inventory instanceof BrewingStandBlockEntity) {
             return "brewing_stand";
         }
-        // 注：1.21 起还有 CrafterBlockEntity（合成器），本分支的支持区间（1.20 – 1.20.4）
-        // 没有这个方块，故不列出，否则会引到一个不存在的类。
-        //
+        if (inventory instanceof CrafterBlockEntity) {
+            return "crafter";
+        }
         // 链上都没命中，最后才查客户端 GUI 的镜像容器登记表。放在这里而不是开头，是因为
         // 真实方块容器在上面就已经返回，没必要为了让镜像容器早识别而在 GUI 的高频渲染路径上
         // （每个槽位每帧都会走 Slot#getMaxStackSize）多做一次同步表查询。

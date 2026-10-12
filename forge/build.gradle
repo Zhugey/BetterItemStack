@@ -1,44 +1,122 @@
 // ===========================================================================
-// forge —— MinecraftForge 1.20.1
+// forge —— MinecraftForge 1.21.1（经典 ForgeGradle）
 //
-// 用 ModDevGradle 的 legacyforge 插件（不是经典 ForgeGradle）：
-//   - 原生提供 mixin { add / config } DSL，自动产出 refmap；
-//   - 自动为 jar 任务配置 reobfJar（Forge 1.20.1 生产环境用 SRG 名），
-//     未重混淆的版本会被挪到 build/devlibs，build/libs 里是可直接分发的那个。
+// 为什么 1.21.1 不能沿用 1.20.1 那套 ModDevGradle legacyforge：
+//   - MDG 的 legacyforge 变体只覆盖 1.17 – 1.20.1（它依赖的 MCP 也没有 1.21.1 版本）；
+//   - 因此这里必须回到经典 ForgeGradle + Sponge 的 Mixin Gradle 插件。
+//
+// 好消息是 1.21.1 反而更简单：**1.20.6 起 Forge 运行期就是官方命名**，
+//   - `reobf = false`：不再需要 official → SRG 的重混淆，build/libs 里的就是成品；
+//   - 不再需要 refmap：名字在运行期直接匹配。
 // ===========================================================================
 plugins {
     id 'multiloader-loader'
-    id 'net.neoforged.moddev.legacyforge'
+    id 'net.minecraftforge.gradle'
+    id 'org.spongepowered.mixin'
 }
 
 mixin {
-    add sourceSets.main, "${mod_id}.refmap.json"
     config "${mod_id}.mixins.json"
 }
 
-legacyForge {
-    version = forge_version
+// ⚠ 这一条必须手写，不能指望混入插件自动加。
+// 实测：mixingradle 0.7-SNAPSHOT 的 addMixinsToJar 只会把 refmap 名字回填进 jar 内的
+// mixins.json，**不会**往 MANIFEST 里写 MixinConfigs；而 1.21.1 的 Forge 侧
+// （与 NeoForge 不同）既不认 mods.toml 的 [[mixins]]，自身 FML 里也搜不到任何
+// "MixinConfigs"/"mixins" 常量 —— 它读混入配置的唯一入口就是 jar 清单的这个属性。
+// 缺了它，构建全绿、进游戏后混入静默不生效。
+// （对照：1.20.1 分支用 MDG legacyforge，那份产物 MANIFEST 里是插件自动写上的。）
+jar {
+    manifest {
+        attributes["MixinConfigs"] = "${mod_id}.mixins.json"
+    }
+}
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+
+    // 在 IDE 里从 build 目录跑时，先把资源处理一遍。
+    copyIdeResources = true
+
+    // 见文件头：1.20.6 起 Forge 运行期用官方命名，不需要重混淆。
+    reobf = false
 
     runs {
-        client { client() }
-        server { server() }
-        data { data() }
-    }
-
-    mods {
-        "${mod_id}" {
-            sourceSet sourceSets.main
+        client {
+            workingDirectory file('run')
+            ideaModule "${rootProject.name}.${project.name}.main"
+            taskName 'Client'
+            mods {
+                modClientRun {
+                    source sourceSets.main
+                }
+            }
+        }
+        server {
+            workingDirectory file('run')
+            ideaModule "${rootProject.name}.${project.name}.main"
+            taskName 'Server'
+            mods {
+                modServerRun {
+                    source sourceSets.main
+                }
+            }
+        }
+        data {
+            workingDirectory file('run')
+            ideaModule "${rootProject.name}.${project.name}.main"
+            args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+            taskName 'Data'
+            mods {
+                modDataRun {
+                    source sourceSets.main
+                }
+            }
         }
     }
+
+    // 控制台中文乱码修复（forge / neoforge 同因同解，fabric 不受影响，理由见下）。
+    //
+    // 症状：IDE 或 Gradle 的运行控制台里中文全是乱码，但游戏内显示正常、logs/latest.log 也正常。
+    // 成因：Forge 侧运行时的 console appender 不是 log4j2 自带的 ConsoleAppender，而是 FML
+    //   log4j2.xml 里的 net.minecrell TerminalConsoleAppender。后者的 append() 无条件调用
+    //   System.out.print(String)，于是输出编码 = JVM 的 stdout.encoding；而 JDK 18 起
+    //   （JEP 400）stdout.encoding 在「未连控制台」（IDE / Gradle 都是管道）时回落到
+    //   native.encoding —— 中文 Windows 即 GBK。IDE 控制台按 UTF-8 解码 GBK 字节 ⇒ 乱码。
+    //   游戏内不经过 stdout、日志文件走 log4j2 的 File appender（字节由 Layout 编码，默认
+    //   UTF-8）⇒ 那两处都正常，只有控制台坏。fabric 不用这个 appender（走 log4j2 原生
+    //   ConsoleAppender，同样写 Layout 的 UTF-8 字节）⇒ 它本来就不乱码。
+    // ⚠ 只加 -Dfile.encoding=UTF-8 无效（实测：JDK 18 起 file.encoding 不再决定 stdout 的编码，
+    //   本机默认它就是 UTF-8 而 stdout 仍是 GBK）。必须显式设 stdout.encoding / stderr.encoding。
+    runs.all { cfg ->
+        cfg.property 'stdout.encoding', 'UTF-8'
+        cfg.property 'stderr.encoding', 'UTF-8'
+    }
 }
+
+sourceSets.main.resources.srcDir 'src/generated/resources'
 
 dependencies {
-    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    // 必须是 -SNAPSHOT：0.8.5 正式版的 CompatibilityLevel 枚举最高只到 JAVA_18，
+    // 而本项目 mixins.json 写的是 JAVA_21（1.20.5 分支已实测通过的值）。
+    annotationProcessor 'org.spongepowered:mixin:0.8.5-SNAPSHOT:processor'
+
+    // Forge 自带的 hack 修复：强制 jopt-simple 用 5.0.4（见 Forge 官方 MDK）。
+    implementation('net.sf.jopt-simple:jopt-simple:5.0.4') { version { strictly '5.0.4' } }
 }
 
-jar {
-    manifest.attributes([
-            // Forge 通过 manifest 的 MixinConfigs 找到混入配置。
-            'MixinConfigs': "${mod_id}.mixins.json",
-    ])
+// ⚠ 必须把每个 source set 的 class 与 resource 输出到**同一个目录**。
+// 默认布局下 class 在 build/classes/java/main、资源在 build/resources/main，
+// FML 会把它们当成**两个**模组根 → 模块层里出现两个模块（classes 那边按目录名成了
+// "main"，资源那边按 modid 成了 "betteritemstack"），而两者都导出
+// com.zhugey.betteritemstack.*，于是 JPMS 直接拒绝启动：
+//   java.lang.module.ResolutionException: Modules betteritemstack and main
+//   export package com.zhugey.betteritemstack.forge to module net.minecraftforge.forge
+// 构建期完全看不出问题，只在 runClient/runServer 时炸。
+// 这段与官方 MultiLoader-Template 1.21.1 的 forge 子项目逐字一致。
+sourceSets.each {
+    def dir = layout.buildDirectory.dir("sourcesSets/$it.name")
+    it.output.resourcesDir = dir
+    it.java.destinationDirectory = dir
 }

@@ -1,34 +1,33 @@
 // ===========================================================================
-// neoforge —— NeoForge 1.20.1（早期版本）
+// neoforge —— NeoForge 1.21.1
 //
-// 1.20.1 的 NeoForge 是 Forge 47.x 的镜像：坐标 net.neoforged:forge、包名仍是
-// net.minecraftforge、loader 的 modid 仍是 forge。所以：
-//   - 源码与 mods.toml 与 forge 子项目完全一致；
-//   - 唯一差别是 legacyForge 用 neoForgeVersion 模式解析 net.neoforged 坐标。
-// 单独出一份产物，是为了让 NeoForge 用户在检索时能直接命中，而不是靠 README 说明。
+// 1.21.1 的 NeoForge 是**独立实现**（坐标 net.neoforged:neoforge、modid 为 neoforge），
+// 不再是 1.20.1 那种 Forge 47.x 的镜像，所以本子项目与 forge 子项目是两套东西：
+//   - 混入配置在 META-INF/neoforge.mods.toml 里用 [[mixins]] 声明（1.20.5 起改名）；
+//   - 运行期就是官方命名，不需要 refmap，也不需要 reobf。
 // ===========================================================================
 plugins {
     id 'multiloader-loader'
-    id 'net.neoforged.moddev.legacyforge'
+    id 'net.neoforged.moddev'
 }
 
-mixin {
-    add sourceSets.main, "${mod_id}.refmap.json"
-    config "${mod_id}.mixins.json"
-}
-
-legacyForge {
-    // MDG 2.0.148 起，三种版本模式（forgeVersion / neoForgeVersion / mcpVersion）
-    // 移到了 enable {} 块里的 LegacyForgeModdingSettings 上，而不是外层扩展。
-    // 这里必须用 neoForgeVersion，它才会去解析 net.neoforged:forge 坐标。
-    enable {
-        neoForgeVersion = neoforge_version
-    }
+neoForge {
+    version = neoforge_version
 
     runs {
         client { client() }
         server { server() }
         data { data() }
+    }
+
+    // 控制台中文乱码修复：与 forge 侧同因同解 —— loader-4.0.45.jar 里的 log4j2.xml 就是
+    // Forge 那份的复制（同样用 FML 的 TerminalConsole appender），因此它同样把输出交给
+    // System.out.print(String)，编码跟着 JVM 的 stdout.encoding 走；JDK 18 起该值在无控制台
+    // 时回落成 native.encoding（中文 Windows = GBK）⇒ IDE 里中文乱码。
+    // 只设 file.encoding 无效，必须显式设 stdout.encoding / stderr.encoding。
+    runs.all { run ->
+        run.systemProperty 'stdout.encoding', 'UTF-8'
+        run.systemProperty 'stderr.encoding', 'UTF-8'
     }
 
     mods {
@@ -38,12 +37,12 @@ legacyForge {
     }
 }
 
-dependencies {
-    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
-}
+// ⚠ 这里**刻意不加** Mixin 注解处理器（与官方 MultiLoader-Template 1.21.1 的
+// neoforge 子项目一致）。原因：
+//   1. NeoForge 1.20.5 起运行期就是官方命名，混入不需要 refmap ⇒ AP 没有存在意义；
+//   2. 混入配置由 neoforge.mods.toml 的 [[mixins]] 声明（同模板），不走 jar 清单；
+//   3. 实测加上 AP 会让 :neoforge:compileJava 直接失败 —— AP 只能找到 MCP 的
+//      [searge,notch] 混淆服务，却拿不到 1.21.1 的名字映射表，于是对每一个
+//      @Inject/@Redirect/@Overwrite 都报
+//      "Unable to locate obfuscation mapping for ... target ..."（error 级，共 11 条）。
 
-jar {
-    manifest.attributes([
-            'MixinConfigs': "${mod_id}.mixins.json",
-    ])
-}

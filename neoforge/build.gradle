@@ -17,7 +17,19 @@ neoForge {
     runs {
         client { client() }
         server { server() }
-        data { data() }
+
+        // ⚠ **刻意不注册 data 运行配置**（2026-10-12 定）：
+        //   ① 本模组零 datagen —— 全项目没有 DataGenerator / GatherDataEvent / DataProvider，
+        //      资源（lang / mixins.json / mods.toml）全部手写，src/generated 是空的；
+        //   ② MDG 2.x 已把 run 类型 `data` 拆成 `clientData` + `serverData`。
+        //      照抄 MultiLoader-Template 的旧写法 `data { data() }` 会让
+        //      :neoforge:prepareDataRun 直接失败：
+        //        Trying to prepare unknown run: data.
+        //        Available run types: [client, clientData, serverData, gameTestServer, server, junit]
+        //   ⚠ 这个任务**只在 IDE 同步 / 跑 run 配置时才执行**，`./gradlew build` 根本不碰它
+        //     ⇒ 构建全绿也照样藏着；判据是 IDEA 完整重导入（重开项目）时会立刻报出来。
+        //   将来真要 datagen：写成 clientData { clientData() } / serverData { serverData() }，
+        //   并自备 DataGenerator 实现。
     }
 
     // 控制台中文乱码修复：与 forge 侧同因同解 —— loader-4.0.45.jar 里的 log4j2.xml 就是

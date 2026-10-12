@@ -66,15 +66,12 @@ minecraft {
             args '--nogui'
         }
 
-        register('data') {
-            args '--mod', mod_id, '--all',
-                    '--output', file('src/generated/resources/'),
-                    '--existing', file('src/main/resources/')
-        }
+        // ⚠ **刻意不注册 data 运行配置**（2026-10-12 定）：本模组零 datagen（全项目没有
+        //   DataGenerator / GatherDataEvent / DataProvider），src/generated 是空的。
+        //   FG7 侧 register('data') 本身不报错（run 名随意），但跑出来只会是原版默认数据、
+        //   并写进仓库 ⇒ 属隐患。将来真要 datagen 再按 FG7 的 runs 写法加回。
     }
 }
-
-sourceSets.main.resources.srcDir 'src/generated/resources'
 
 // ⚠ 本分支**不接混入 AP**，原因链：
 //   1. 本代 Forge 运行期是官方命名 ⇒ **不需要 refmap**；

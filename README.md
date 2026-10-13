@@ -6,11 +6,12 @@
 > 箱子、木桶、潜影盒、玩家背包可以堆到极大值；**漏斗与漏斗矿车保持原版上限**，
 > 红石计时器与计数器因此不受影响。
 
-- **支持的游戏版本**：**Minecraft 1.20.1 / 1.21.1**，Fabric / Forge / NeoForge 三平台
+- **支持的游戏版本**：**Minecraft 1.20.1 / 1.21.1 / 1.21.11**，Fabric / Forge / NeoForge 三平台
 - **一个游戏版本一个分支**：源码请切到对应分支查看
   （[`1.20.1`](https://github.com/Zhugey/BetterItemStack/tree/1.20.1) /
-  [`1.21.1`](https://github.com/Zhugey/BetterItemStack/tree/1.21.1)）；
-  本 README 描述的是**当前分支**，即 Minecraft 1.21.1
+  [`1.21.1`](https://github.com/Zhugey/BetterItemStack/tree/1.21.1) /
+  [`1.21.11`](https://github.com/Zhugey/BetterItemStack/tree/1.21.11)）；
+  本 README 描述的是**当前分支**，即 Minecraft 1.21.11
 - **构建产物从 [Releases](https://github.com/Zhugey/BetterItemStack/releases) 下载** ——
   Release 标题带 `(Minecraft x.y.z)`，按你的游戏版本对号即可
 - 需要 **Java 21**（Minecraft 1.20.1 需要 Java 17）
@@ -436,7 +437,8 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 | Minecraft | 结论 |
 |---|---|
-| **1.21.1** | ✅ 三平台各一份 |
+| **1.21.11** | ✅ 三平台各一份 |
+| 1.21.1 | ✅ 由 `1.21.1` 分支的 1.1.x 提供（那一代 `ItemStack` 的编解码没有 `MAP_CODEC` 这层根，替换点与本分支不同） |
 | 1.20.1 | ✅ 由 `1.20.1` 分支的 1.0.x 提供（那一代数量走手写字节流，机制与本分支不同） |
 | 其它版本 | ❌ 不适用。1.21 一代的其它小版本未做验证；1.20.4 及更早没有物品组件，本构建会因符号缺失而无法启动 |
 

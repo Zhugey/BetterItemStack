@@ -37,9 +37,10 @@ jobs:
       - name: setup jdk
         uses: actions/setup-java@v4
         with:
-          # Gradle 守护进程需要 21；编译用的 toolchain 由 gradle.properties 的
-          # java_version 决定（1.20.1 分支为 17），foojay 解析器会自动补下。
-          java-version: '21'
+          # 26.x 起 Gradle 守护进程与编译 toolchain 都要 Java 25（Mojang 自 26.1 起
+          # 向玩家分发 Java 25；Loom 1.18 也用 Java 25 的 FFM API 取代了原 native 库）。
+          # 其它分支仍是 21 —— 该值随分支不同，改游戏版本时记得同步。
+          java-version: '25'
           distribution: 'microsoft'
       - name: make gradle wrapper executable
         run: chmod +x ./gradlew

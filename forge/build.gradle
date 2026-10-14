@@ -58,9 +58,45 @@ minecraft {
             // ⚠ FG7 把 FG6 的 `property(...)` 改名为 `systemProperty(...)`。
             systemProperty 'stdout.encoding', 'UTF-8'
             systemProperty 'stderr.encoding', 'UTF-8'
+
+            // ---- JDK 25 的 JVM 原生告警（都走 stderr ⇒ IDEA 里一片红，与本 Mod 无关）----
+            //   `sun.misc.Unsafe::objectFieldOffset` 的 "terminally deprecated"（JEP 498）：
+            //   调用方是 **Forge 自己的** net.minecraftforge.unsafe.UnsafeHacks（unsafe-0.9.2.jar），
+            //   客户端与服务端都会出现。`allow` 只把该告警降为静默，不改变任何可用性。
+            //   ✅ 实测：加之前 3 行、加之后 0 行。
+            jvmArgs '--sun-misc-unsafe-memory-access=allow'
+
+            // ⚠ **不要**在这里加 `--enable-native-access=<模块>` 去消 JEP 472 的
+            //   `java.lang.System::load` → "A restricted method …" 那一批。**实测它反噬**：
+            //   `--enable-native-access=com.sun.jna,org.jline.nativ,org.lwjgl,…` 之后，
+            //   JVM 逐条打印 `WARNING: Unknown module: <名> specified to --enable-native-access`（7 条），
+            //   而原来的 "A restricted method" 7 条**一条都没少**。
+            //   原因：`--enable-native-access` 只对 **boot layer** 的模块有效，而 JNA / JLine / LWJGL
+            //   是 ModLauncher 在**子 ModuleLayer** 里加载的 ⇒ 启动参数里点名它们必然 "Unknown module"。
+            //   `ALL-UNNAMED` 也覆盖不到具名模块（实测）；`ALL-MODULE-PATH` JDK 25 **不认**。
+            //   ⇒ 这批告警在 Forge dev 下**无法从启动参数消除**（要消只能等上游在 jar 清单里加
+            //     `Enable-Native-Access` 属性 —— LWJGL 3.4.1 还没有）。它们本身无害，留着即可。
+            //
+            // ⚠ 同理，ModLauncher 的 `Ignoring duplicate module on SecureModuleFinder`（本项目 dev
+            //   客户端每次 23 行）是**裸输出、没有开关**，也不要试图从这边消。
         }
 
-        register('client')
+        register('client') {
+            // 开发环境用原版的"离线开发者模式"（vanilla `Main` 的 `--offlineDeveloperMode` 开关）。
+            // 不开它，dev 客户端每次启动都会刷 2 条假的 ERROR：
+            //   Failed to fetch Realms feature flags / Couldn't connect to realms
+            //   （RealmsServiceException: Realms authentication error with message
+            //     'java.lang.RuntimeException: Failed to parse into SignedJWT: 0'）
+            // 成因：dev 是**假会话**（FG7 传的 accessToken 就是字面量 `0`，游戏内用户名 Dev），
+            // 而 RealmsClient 仍会带它去请求 Realms ⇒ 鉴权失败。
+            // 开了之后 `Minecraft` 走 `UserApiService.OFFLINE` +
+            // `ProfileKeyPairManager.EMPTY_KEY_MANAGER`，且
+            // `RealmsClient.fetchFeatureFlags()` / `RealmsAvailability.check()` 直接短路返回
+            // ⇒ 这些请求根本不会发出。
+            // ⚠ 只影响 dev 运行参数，**不进 jar、不影响任何玩家**；代价是 dev 里聊天不能签名（本来也签不了）。
+            // 与 fabric/build.gradle 的 loom client 那处是同一个开关，两个平台对齐。
+            args '--offlineDeveloperMode'
+        }
 
         register('server') {
             args '--nogui'
@@ -115,4 +151,43 @@ sourceSets.each {
     def dir = layout.buildDirectory.dir("sourcesSets/$it.name")
     it.output.resourcesDir = dir
     it.java.destinationDirectory = dir
+}
+
+// ===========================================================================
+// 把游戏 JVM 的 **stderr** 从控制台挪到文件（只影响 dev 运行，不进 jar）
+//
+// 起因：JDK 25 会在游戏 JVM 的 stderr 上打印两类"原生访问"提示 ——
+//   · JEP 472：`A restricted method in java.lang.System has been called` +
+//              `Use --enable-native-access=<模块>`（调用方是 LWJGL / JNA / JLine）
+//   · JEP 498：`sun.misc.Unsafe::objectFieldOffset` 的 "terminally deprecated"
+//              —— 这一条已由上面的 `--sun-misc-unsafe-memory-access=allow` 消掉
+// 再加上 ForgeGradle 的 slime launcher 自己打的
+//   `Ignoring duplicate module on SecureModuleFinder: org.lwjgl.*.natives …`（每次 23 行）。
+// 它们**都不是错误**，而且**无法从启动参数消除**：
+//   · FG7 其实已经传了 `--enable-native-access=ALL-UNNAMED`（见它生成的
+//     `build/minecraftforge/forgegradle/slimeLauncherMetadataForForge/metadata/minecraft/version.json`
+//     的 `arguments.jvm[4]`），但 slime launcher 把 MC 的库放在 **module path** 上、
+//     由 ModLauncher 在**子 ModuleLayer** 里加载 ⇒ `ALL-UNNAMED` 覆盖不到具名模块，
+//     而点名模块会报 `WARNING: Unknown module: … specified to --enable-native-access`（实测反噬）。
+//   · `Ignoring duplicate module` 是裸输出，没有开关。
+// 对照：NeoForge 的 MDG 只传同一个 `ALL-UNNAMED`，但它把库放在 **classpath** ⇒ 一条都不刷。
+//
+// IDEA 会把子进程的 stderr 全部标红，所以这里把它落到文件：控制台只留 log4j 的输出
+// （Forge 的 TerminalConsoleAppender 走 stdout，Mixin 的 FATAL 也走 log4j ⇒ 关键诊断照旧可见）。
+// ⚠ 实测（2026-10-14）：这一手只吃掉 stderr 的部分 —— JEP 472 那 21 行确实是 stderr，会进文件；
+//   而 `Ignoring duplicate module` 那 23 行是 slime launcher 用 **stdout** 打的（System.out.println，
+//   裸输出无前缀），**留在控制台**。好在 IDEA 只把 stderr 标红 ⇒ 改完之后"红字"消失，
+//   剩 23 行是普通颜色。**不能改用 stdout 重定向**，那会把整个游戏日志一起吞掉。
+// ⚠ 这是"移出视线"不是"消除"：JVM 级别的真实报错（原生崩溃摘要等）也会进这个文件，
+//   排查时去 `build/<runClient|runServer>-jvm-stderr.log` 看。
+// ===========================================================================
+tasks.matching { it.name in ['runClient', 'runServer'] }.configureEach { task ->
+    def stderrFile = layout.buildDirectory.file("${task.name}-jvm-stderr.log").get().asFile
+    def stream
+    task.doFirst {
+        stderrFile.parentFile.mkdirs()
+        stream = new FileOutputStream(stderrFile, true)
+        task.errorOutput = stream
+    }
+    task.doLast { stream?.close() }
 }

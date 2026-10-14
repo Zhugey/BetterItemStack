@@ -1,7 +1,7 @@
 package com.zhugey.betteritemstack.mixin.client;
 
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
@@ -10,14 +10,19 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
 /**
- * <p>通过 Mixin 修改 GuiGraphics 类，用于在物品栏中显示堆叠数时格式化大数字。
+ * <p>通过 Mixin 修改 {@code GuiGraphicsExtractor} 类，用于在物品栏中显示堆叠数时格式化大数字。
  * <p>将超过 1000 的数字格式化为 K、M、B 单位，并添加颜色标识。
+ *
+ * <p><b>26.2 的改名</b>：本代把旧 {@code net.minecraft.client.gui.GuiGraphics} 整类更名为
+ * {@link GuiGraphicsExtractor}（新渲染管线里它只负责"抽取"绘制指令，不再即刻绘制），
+ * 原 {@code renderItemDecorations} 也随之更名为 {@code itemDecorations}，签名逐字未变：
+ * {@code (Font, ItemStack, int, int, @Nullable String)}。
  */
-@Mixin(GuiGraphics.class)
+@Mixin(GuiGraphicsExtractor.class)
 public class DrawContextMixin {
 
     /**
-     * <p>修改 drawItemInSlot 方法中显示堆叠数量的字符串。
+     * <p>修改 itemDecorations 方法中显示堆叠数量的字符串。
      * <p>当物品数量大于或等于 1000 时，按千、百万、十亿缩写显示，并添加颜色标识。
      *
      * @param original 原始显示字符串
@@ -29,7 +34,7 @@ public class DrawContextMixin {
      * @return 格式化后的数量字符串
      */
     @ModifyVariable(
-            method = "renderItemDecorations(Lnet/minecraft/client/gui/Font;Lnet/minecraft/world/item/ItemStack;IILjava/lang/String;)V",
+            method = "itemDecorations(Lnet/minecraft/client/gui/Font;Lnet/minecraft/world/item/ItemStack;IILjava/lang/String;)V",
             at = @At("HEAD"),
             argsOnly = true
     )

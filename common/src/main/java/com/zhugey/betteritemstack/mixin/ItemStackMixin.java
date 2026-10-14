@@ -3,11 +3,8 @@ package com.zhugey.betteritemstack.mixin;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import com.zhugey.betteritemstack.Config;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponentPatch;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.ExtraCodecs;
 import net.minecraft.world.entity.player.Player;
@@ -27,46 +24,49 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * <p>对 {@link ItemStack} 的 Mixin：改写全局最大堆叠数量、放宽数量在序列化上的取值上限，
- * 并在工具提示里追加堆叠数量。</p>
+ * <p>对 {@link ItemStack} 的 Mixin：放宽数量在序列化上的取值上限，并在工具提示里追加堆叠数量。</p>
  *
- * <p><b>1.21.1 相对 1.20 一代的三处关键差异</b>——本代已经没有"数量只有 8 位"的历史包袱，
- * 但换成了一条更隐蔽的约束：</p>
+ * <p><b>"每叠能放多少"不在这里</b>：26.2 把 {@code getMaxStackSize()} 上提到了接口
+ * {@link net.minecraft.world.item.ItemInstance} 的默认方法，{@code ItemStack} 自己不再声明它
+ * ⇒ 放大上限的职责已挪到 {@code ItemInstanceMixin}（接口目标只能用 {@code @Overwrite}）。
+ * 本类只负责"让放大的数量真的存得下来、并与原版逐字兼容"。</p>
  *
+ * <p><b>必须改写 {@link ItemStack#CODEC} 家族。</b>原版把数量写死成
+ * {@code ExtraCodecs.intRange(1, 99)}：</p>
+ *
+ * <pre>
+ * MAP_CODEC = MapCodec.recursive("ItemStack", subCodec -&gt; RecordCodecBuilder.mapCodec(
+ *         i -&gt; i.group(Item.CODEC_WITH_BOUND_COMPONENTS.fieldOf("id").forGetter(ItemStack::typeHolder),
+ *                      ExtraCodecs.optionalAlwaysPresentFieldOf(ExtraCodecs.intRange(1, 99), "count", 1)
+ *                              .forGetter(ItemStack::getCount),
+ *                      DataComponentPatch.CODEC.optionalFieldOf("components", DataComponentPatch.EMPTY)
+ *                              .forGetter(s -&gt; s.components.asPatch()))
+ *              .apply(i, ItemStack::new)));
+ * </pre>
+ *
+ * <p>也就是说，<b>只把 {@code getMaxStackSize()} 放大而不动 CODEC，数量超过 99 的物品
+ * 会在编码阶段直接报错</b>——{@code intRange} 是"校验型"编解码器，越界返回
+ * {@code DataResult.error} 而不是截断。落盘（箱子、玩家背包、区块里的物品实体）与网络
+ * （{@code ItemStack#validatedStreamCodec} 在解码后会拿 CODEC 再编一遍做校验）都会走到它，
+ * 后果是物品无法保存、同步被踢。</p>
+ *
+ * <p>因此这里在 {@code <clinit>} 末尾<b>整体替换</b> {@code MAP_CODEC} 及其派生，
+ * 除把数量区间放开到 {@link Integer#MAX_VALUE} 外，其余字段与原版逐字一致。</p>
+ *
+ * <p><b>26.2 相对 1.21.11 的两处字段变化</b>（都已按新版原版逐字对齐）：</p>
  * <ol>
- *   <li><b>必须改写 {@link ItemStack#CODEC}。</b>本代原版把数量写死成
- *       {@code ExtraCodecs.intRange(1, 99)}：
- *       <pre>
- *       ItemStack.CODEC = Codec.lazyInitialized(() -&gt; RecordCodecBuilder.create(
- *               i -&gt; i.group(ITEM_NON_AIR_CODEC.fieldOf("id").forGetter(ItemStack::getItemHolder),
- *                            ExtraCodecs.intRange(1, 99).fieldOf("count").orElse(1).forGetter(ItemStack::getCount),
- *                            DataComponentPatch.CODEC.optionalFieldOf("components", DataComponentPatch.EMPTY)
- *                                    .forGetter(s -&gt; s.components.asPatch()))
- *                    .apply(i, ItemStack::new)));
- *       </pre>
- *       也就是说，<b>只把 {@code getMaxStackSize()} 放大而不动 CODEC，数量超过 99 的物品
- *       会在编码阶段直接报错</b>——{@code intRange} 是"校验型"编解码器，
- *       越界返回 {@code DataResult.error} 而不是截断。落盘（箱子、玩家背包、区块里的物品实体）
- *       与网络（{@code ItemStack#validatedStreamCodec} 在解码后会拿 CODEC 再编一遍做校验）
- *       都会走到它，后果是物品无法保存、同步被踢。
- *       因此这里在 {@code <clinit>} 末尾<b>整体替换</b> {@code CODEC}，
- *       除把数量区间放开到 {@link Integer#MAX_VALUE} 外，其余字段与原版逐字一致。</li>
- *
- *   <li><b>1.20 一代那两条"字节改 int"的补丁必须删除。</b>那时 {@code ItemStack#save(CompoundTag)}
- *       写的是 {@code putByte("Count", (byte) count)}、{@code ItemStack#of(CompoundTag)} 读的是
- *       {@code getByte("Count")}，所以要在 TAIL 补一个 int 覆盖、在 RETURN 用 int 还原。
- *       本代这两个方法<b>已经不存在</b>（存档改走 CODEC），继续写它们的 {@code @Inject}
- *       会因找不到宿主方法而在启动时抛 {@code InjectionError}——
- *       <b>构建期完全不报错</b>，正是最需要警惕的那一类。</li>
- *
- *   <li><b>"可损坏物品"改由组件表达。</b>{@code Item#isDamageable()} 已被移除，
- *       判定改用 {@link DataComponents#MAX_DAMAGE}。它只看物品类型、<b>不受 Unbreakable 组件影响</b>，
- *       与 1.20 一代 {@code getItem().isDamageable()} 的语义完全一致。</li>
+ *   <li>id 字段的 codec 由 {@code Item.CODEC} 换成 {@code Item.CODEC_WITH_BOUND_COMPONENTS}
+ *       （它在 {@code CODEC} 之外多校验"该物品的组件已绑定"），
+ *       取值方法由 {@code ItemStack::getItemHolder} 改名为 {@code ItemStack::typeHolder}。</li>
+ *   <li>count 字段由 {@code ExtraCodecs.intRange(1, 99).fieldOf("count").orElse(1)}
+ *       换成 {@code ExtraCodecs.optionalAlwaysPresentFieldOf(ExtraCodecs.intRange(1, 99), "count", 1)}
+ *       ——编码时会<b>始终写出</b> count 字段（不再省略默认值），语义由 {@code orElse} 变成
+ *       {@code xmap(o -&gt; o.orElse(default), Optional::of)}。</li>
  * </ol>
  *
- * <p>另外，本代 {@code ItemStack#getTooltipLines} 多了一个
- * {@link Item.TooltipContext} 形参（{@code (Item.TooltipContext, Player, TooltipFlag)}），
- * 少写一个参数同样只在<b>启动时</b>才会被 Mixin 以回调签名不符拒收。</p>
+ * <p>另外，本代 {@code ItemStack#getTooltipLines} 的签名是
+ * {@code (Item.TooltipContext, Player, TooltipFlag)}，
+ * 少写或错写一个参数只在<b>启动时</b>才会被 Mixin 以回调签名不符拒收，构建期无提示。</p>
  */
 @Mixin(ItemStack.class)
 public abstract class ItemStackMixin {
@@ -112,17 +112,18 @@ public abstract class ItemStackMixin {
     @Final
     public static Codec<ItemStack> OPTIONAL_CODEC;
 
-    /**
-     * 原版 {@code CODEC.validate(ItemStack::validateStrict)} —— 严格校验版。
+    /*
+     * ⚠ 这里曾经还有第三项 {@code STRICT_CODEC}（= {@code CODEC.validate(ItemStack::validateStrict)}）。
      *
-     * <p>它的校验条件是 {@code getCount() > getMaxStackSize()}，而 {@code getMaxStackSize()}
-     * 已被本模组放大，所以校验本身不会拦大堆叠；<b>真正的问题是它派生自旧 {@code CODEC}</b>，
-     * 数量字段仍卡在 {@code [1,99]}。必须一并重建。</p>
+     * 26.2 把该字段<b>整个删掉了</b>（1.21.11 上它还在）。现在 {@code validateStrict} 改为在解码
+     * 之后由调用方直接调用（{@code ItemInput#parse}、{@code ItemStackTemplate#fromStack}、
+     * {@code ItemStack#validateComponents} 路径），不再有"严格版 codec"这一层。
+     *
+     * 保留 {@code @Shadow} 的后果**只在启动时**才暴露，而且极凶：
+     *   InvalidMixinException: @Shadow field STRICT_CODEC was not located in the target class …
+     *   ⇒ 混入整体应用失败 ⇒ 游戏进不去。构建期完全看不出来。
+     * 因此 26.2 的 codec 家族只有三项：MAP_CODEC（根）、CODEC、OPTIONAL_CODEC。
      */
-    @Mutable
-    @Shadow
-    @Final
-    public static Codec<ItemStack> STRICT_CODEC;
 
     /**
      * <p>重写 {@link ItemStack#CODEC}，把数量字段的取值上限由原版的 {@code [1, 99]}
@@ -132,15 +133,14 @@ public abstract class ItemStackMixin {
      * {@code OPTIONAL_CODEC} 都已初始化完毕，直接整体替换即可，
      * 不必去改原版那段 {@code RecordCodecBuilder} 的源码。</p>
      *
-     * <p><b>本代 {@code ItemStack} 的编解码结构比 1.21.1 多了一层</b>：{@link #MAP_CODEC}
+     * <p><b>本代 {@code ItemStack} 的编解码结构比 1.21.11 多了一层</b>：{@link #MAP_CODEC}
      * 才是根（{@code MapCodec.recursive}），{@link #CODEC} 反过来由它派生。
      * 因此这里以 {@code MAP_CODEC} 为主改，并把由它派生的 {@link #CODEC}、
-     * {@link #STRICT_CODEC}、{@link #OPTIONAL_CODEC} 一并重建。</p>
+     * {@link #OPTIONAL_CODEC} 一并重建（26.2 已无 {@code STRICT_CODEC}，见上方注释）。</p>
      *
-     * <p>除数量字段外，id 与 components 两项与原版逐字一致：
-     * id 用 {@code Item.CODEC}（其定义是 {@code holderByNameCodec().validate(非空气)}，
-     * 与原版 1.21.1 里那个 {@code ITEM_NON_AIR_CODEC} 同源；后者自 1.21.9 起不再是公开字段。
-     * ⚠ <b>不要图省事直接写 {@code holderByNameCodec()}</b> —— 那会丢掉"非空气"校验），
+     * <p>除数量字段外，id 与 components 两项与 26.2 原版逐字一致：
+     * id 用 {@code Item.CODEC_WITH_BOUND_COMPONENTS}（= {@code Item.CODEC} 之上再校验
+     * "该物品的组件已绑定"）、取值走 {@code ItemStack::typeHolder}；
      * components 用 {@code getComponentsPatch()}（公开方法，等价于原版内联的
      * {@code components.asPatch()}）。</p>
      *
@@ -154,13 +154,14 @@ public abstract class ItemStackMixin {
     @Inject(method = "<clinit>", at = @At("TAIL"))
     private static void bis$allowLargeCounts(CallbackInfo ci) {
         // ① 先换"根"：MAP_CODEC 是本代数量上限的唯一源头，其余 codec 都从它派生。
-        //    三个字段除数量区间外与原版逐字一致（含 id 用 Item.CODEC 而非裸 holderByNameCodec）。
+        //    三个字段除数量区间外与原版逐字一致（含 id 用 CODEC_WITH_BOUND_COMPONENTS）。
         MAP_CODEC = MapCodec.recursive(
                 "ItemStack",
                 self -> RecordCodecBuilder.mapCodec(
                         instance -> instance.group(
-                                        Item.CODEC.fieldOf("id").forGetter(ItemStack::getItemHolder),
-                                        ExtraCodecs.intRange(1, Integer.MAX_VALUE).fieldOf("count").orElse(1)
+                                        Item.CODEC_WITH_BOUND_COMPONENTS.fieldOf("id").forGetter(ItemStack::typeHolder),
+                                        ExtraCodecs.optionalAlwaysPresentFieldOf(
+                                                        ExtraCodecs.intRange(1, Integer.MAX_VALUE), "count", 1)
                                                 .forGetter(ItemStack::getCount),
                                         DataComponentPatch.CODEC
                                                 .optionalFieldOf("components", DataComponentPatch.EMPTY)
@@ -170,54 +171,32 @@ public abstract class ItemStackMixin {
                 )
         );
 
-        // ② 以下三个都必须用新根重建。原版它们是"按值捕获"派生出来的
+        // ② 以下两个都必须用新根重建。原版它们是"按值捕获"派生出来的
         //    （CODEC 由 Codec.lazyInitialized(MAP_CODEC::codec) 捕获了当时的实例），
         //    只换字段不会让它们跟着变：
         //        CODEC          = MAP_CODEC::codec
-        //        STRICT_CODEC   = CODEC.validate(validateStrict)
         //        OPTIONAL_CODEC = optionalEmptyMap(CODEC).xmap(...)
         //    ⚠ 漏掉任何一个，对应那条落盘/存档路径上超过 99 的堆叠都会报 [1;99] 存不下来。
+        //    ⚠ 26.2 没有 STRICT_CODEC（1.21.11 有），不要再加回来。
         CODEC = Codec.lazyInitialized(MAP_CODEC::codec);
-        STRICT_CODEC = CODEC.validate(ItemStack::validateStrict);
         OPTIONAL_CODEC = ExtraCodecs.optionalEmptyMap(CODEC)
                 .xmap(optional -> optional.orElse(ItemStack.EMPTY),
                         stack -> stack.isEmpty() ? Optional.empty() : Optional.of(stack));
     }
 
-    /**
-     * <p>重写 {@link ItemStack#getMaxStackSize()} 方法，返回全局最大堆叠数量。</p>
-     * <p>非堆叠物品列表中的物品或可损坏物品将保持原始最大堆叠数量。</p>
+    /*
+     * ⚠ 这里曾经有 {@code @Inject(method = "getMaxStackSize()I", at = @At("HEAD"), cancellable = true)}。
      *
-     * <p>注意：这是本 Mod 唯一一处"全局放大"物品上限的地方，也是问题的根源——
-     * 原版有若干逻辑（尤其漏斗的容量判定）直接依赖该方法，因此凡是需要"物品原本能堆多少"
-     * 的地方都必须改用 {@link com.zhugey.betteritemstack.VanillaMax}。</p>
+     * 26.2 把 {@code getMaxStackSize()} 上提到接口 {@link net.minecraft.world.item.ItemInstance} 的
+     * <b>默认方法</b>，{@code ItemStack} 自己不再声明它 ⇒ 注入到本类的注解在<b>运行期</b>会以
+     * "找不到目标方法"被拒（构建期不报错）。该逻辑已整体迁到 {@code ItemInstanceMixin}：
+     * 接口目标必须用接口 mixin，而接口 mixin 里又只能用 {@code @Overwrite}（Forge 的
+     * Mixin 注解处理器拒绝接口里的 injector）。
      *
-     * @param cir Mixin 注入所需的 CallbackInfoReturnable，用于设置返回值
+     * 本 Mod 依然是"唯一一处全局放大"：原版有若干逻辑（尤其漏斗的容量判定）直接依赖
+     * {@code ItemStack#getMaxStackSize()}，因此凡是需要"物品原本能堆多少"的地方都必须改用
+     * {@link com.zhugey.betteritemstack.VanillaMax}。
      */
-    @Inject(method = "getMaxStackSize()I", at = @At("HEAD"), cancellable = true)
-    private void overrideMaxCount(CallbackInfoReturnable<Integer> cir) {
-        ItemStack stack = (ItemStack) (Object) this;
-
-        // 带耐久度的物品（工具、护甲）原版上限即为 1，必须保持原版值。
-        //
-        // 1.20.5 起"是否有耐久"由一个物品组件表达（Item 上的 isDamageable() 已移除），
-        // 判定改用 has(MAX_DAMAGE) —— 它只看物品类型，**不**受 Unbreakable 组件影响，
-        // 与 1.20 一代的 getItem().isDamageable() 语义完全一致。
-        // 若改用 isDamageableItem()，一个附了 Unbreakable 的工具会被当成普通物品放大到 GLOBAL_MAX，
-        // 进而导致 Item#isEnchantable（判断式 getMaxStackSize() == 1）失败——该装备将无法在附魔台附魔。
-        if (stack.has(DataComponents.MAX_DAMAGE)) {
-            return;
-        }
-
-        // 黑名单物品保持原版上限。仅在黑名单非空时才做 ID 查询：
-        // getMaxStackSize() 是热路径，避免每次调用都分配一个 ResourceLocation。
-        List<String> blacklist = Config.get().nonStackableItems;
-        if (!blacklist.isEmpty() && blacklist.contains(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())) {
-            return;
-        }
-
-        cir.setReturnValue(Config.GLOBAL_MAX);
-    }
 
     /**
      * <p>在物品的工具提示中追加一行堆叠数量（数量达到 {@link #BIS_TOOLTIP_THRESHOLD} 时）。</p>

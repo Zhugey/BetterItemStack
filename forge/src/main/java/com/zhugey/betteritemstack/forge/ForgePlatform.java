@@ -26,7 +26,11 @@ public final class ForgePlatform implements Platform {
 
     @Override
     public String modVersion() {
-        return ModList.get().getModContainerById(BetterItemStack.MOD_ID)
+        // ⚠ 26.2（Forge 65）起 {@code ModList} 由"单例 + 实例方法"改成了**纯静态工具类**：
+        //   {@code ModList.get()} 已被删除，查容器一律走静态的 {@code getModContainerById(String)}。
+        //   照旧写 {@code ModList.get().getModContainerById(...)} 会在编译期报
+        //   "找不到符号: 方法 get()"。（NeoForge 26.2 仍保留 {@code ModList.get()}，两边不同步。）
+        return ModList.getModContainerById(BetterItemStack.MOD_ID)
                 .map(container -> container.getModInfo().getVersion().toString())
                 .orElse("unknown");
     }

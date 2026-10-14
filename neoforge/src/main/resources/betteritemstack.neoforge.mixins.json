@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.zhugey.betteritemstack.neoforge.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ItemStackNeoForgeMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}

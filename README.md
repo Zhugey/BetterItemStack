@@ -6,15 +6,16 @@
 > 箱子、木桶、潜影盒、玩家背包可以堆到极大值；**漏斗与漏斗矿车保持原版上限**，
 > 红石计时器与计数器因此不受影响。
 
-- **支持的游戏版本**：**Minecraft 1.20.1 / 1.21.1 / 1.21.11**，Fabric / Forge / NeoForge 三平台
+- **支持的游戏版本**：**Minecraft 1.20.1 / 1.21.1 / 1.21.11 / 26.2**，Fabric / Forge / NeoForge 三平台
 - **一个游戏版本一个分支**：源码请切到对应分支查看
   （[`1.20.1`](https://github.com/Zhugey/BetterItemStack/tree/1.20.1) /
   [`1.21.1`](https://github.com/Zhugey/BetterItemStack/tree/1.21.1) /
-  [`1.21.11`](https://github.com/Zhugey/BetterItemStack/tree/1.21.11)）；
+  [`1.21.11`](https://github.com/Zhugey/BetterItemStack/tree/1.21.11) /
+  [`26.2`](https://github.com/Zhugey/BetterItemStack/tree/26.2)）；
   本 README 描述的是**当前分支**，即 Minecraft 1.20.1
 - **构建产物从 [Releases](https://github.com/Zhugey/BetterItemStack/releases) 下载** ——
   Release 标题带 `(Minecraft x.y.z)`，按你的游戏版本对号即可
-- 需要 **Java 17**（1.21.1 与 1.21.11 都需要 Java 21）
+- 需要 **Java 17**（1.21.1 与 1.21.11 都需要 Java 21，26.2 需要 Java 25）
 - 基于 [ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发
 - 仓库：<https://github.com/Zhugey/BetterItemStack>
 

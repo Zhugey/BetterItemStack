@@ -6,15 +6,16 @@
 > 箱子、木桶、潜影盒、玩家背包可以堆到极大值；**漏斗与漏斗矿车保持原版上限**，
 > 红石计时器与计数器因此不受影响。
 
-- **支持的游戏版本**：**Minecraft 1.20.1 / 1.21.1 / 1.21.11**，Fabric / Forge / NeoForge 三平台
+- **支持的游戏版本**：**Minecraft 1.20.1 / 1.21.1 / 1.21.11 / 26.2**，Fabric / Forge / NeoForge 三平台
 - **一个游戏版本一个分支**：源码请切到对应分支查看
   （[`1.20.1`](https://github.com/Zhugey/BetterItemStack/tree/1.20.1) /
   [`1.21.1`](https://github.com/Zhugey/BetterItemStack/tree/1.21.1) /
-  [`1.21.11`](https://github.com/Zhugey/BetterItemStack/tree/1.21.11)）；
-  本 README 描述的是**当前分支**，即 Minecraft 1.21.11
+  [`1.21.11`](https://github.com/Zhugey/BetterItemStack/tree/1.21.11) /
+  [`26.2`](https://github.com/Zhugey/BetterItemStack/tree/26.2)）；
+  本 README 描述的是**当前分支**，即 Minecraft 26.2
 - **构建产物从 [Releases](https://github.com/Zhugey/BetterItemStack/releases) 下载** ——
   Release 标题带 `(Minecraft x.y.z)`，按你的游戏版本对号即可
-- 需要 **Java 21**（Minecraft 1.20.1 需要 Java 17）
+- 需要 **Java 25**（Minecraft 1.21.1 – 1.21.11 需要 Java 21，1.20.1 需要 Java 17）
 - 基于 [ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发
 - 仓库：<https://github.com/Zhugey/BetterItemStack>
 
@@ -150,25 +151,26 @@ this.addSlot(new Slot(this.enchantSlots, 0, 15, 47) {
 滞留药水、成书、已探索地图、鱼桶、烟花之星、唱片碎片。注入在被覆写的父类方法上，
 对这些物品不会执行。
 
-格子**角标数字**走的是另一条路径（`GuiGraphics#renderItemDecorations`），与物品类型无关。
+格子**角标数字**走的是另一条路径（`GuiGraphicsExtractor#itemDecorations`），与物品类型无关。
 
 ### 六、注入点一览
 
 | Mixin | 目标（官方映射名） | 作用 |
 |---|---|---|
-| `ItemStackMixin` | `ItemStack` 的静态初始化块（`<clinit>`） | 整体替换 `CODEC`，把数量区间放开到 `[1, Integer.MAX_VALUE]`（见第八节） |
-| | `ItemStack#getMaxStackSize` | 把可堆叠物品的上限提升为 `global_max` |
+| `ItemStackMixin` | `ItemStack` 的静态初始化块（`<clinit>`） | 以 `MAP_CODEC` 为根整体重建，把数量区间放开到 `[1, Integer.MAX_VALUE]`（见第八节） |
 | | `ItemStack#getTooltipLines` | 追加堆叠数量提示 |
+| `ItemInstanceMixin` | `ItemInstance#getMaxStackSize`（`@Overwrite`） | 把可堆叠物品的上限提升为 `global_max` |
+| `ItemStackNeoForgeMixin`（**只在 NeoForge 产物里**） | `ItemStack#getMaxStackSize`（`@Overwrite`） | NeoForge 给 `ItemStack` 补了自己的同名实现、会绕开接口，必须一并接管 |
 | `InventoryMixin` | `Container#getMaxStackSize` 与 `#getMaxStackSize(ItemStack)`（`@Overwrite`） | 按容器类型区分每格容量 |
 | `SlotMixin` | `Slot#getMaxStackSize(ItemStack)` | GUI 侧容量，保留槽位自身声明的上限 |
 | `ScreenHandlerMixin` | `AbstractContainerMenu#addSlot` | 客户端 GUI 的镜像容器按界面类型登记，与服务端判定对齐 |
 | `HopperBlockEntityMixin` | `HopperBlockEntity#isFullContainer` / `#tryMoveInItem` / `#inventoryFull` / `#canMergeItems` | 漏斗四处判定接回容器感知逻辑 |
 | `ItemEntityMixin` | `ItemEntity#merge` | 掉落物合并上限 |
-| `DrawContextMixin`（客户端） | `GuiGraphics#renderItemDecorations` | 角标数字缩写为 K / M / B |
+| `DrawContextMixin`（客户端） | `GuiGraphicsExtractor#itemDecorations` | 角标数字缩写为 K / M / B |
 
-> 表中用 **Mojang 官方映射名**——全平台共用一份源码，必须统一映射。Fabric 侧的产物在构建时
-> 会被重映射到 intermediary；Forge / NeoForge 自 1.20.6 起在**运行期**就是官方命名，
-> 那两份产物因此不需要 refmap。
+> 表中用 **Mojang 官方映射名**——全平台共用一份源码，必须统一映射。26.2 起原版**不再混淆**
+> （Mojang 只分发 client / server，没有 mappings 文件），三个平台的产物都直接是官方命名，
+> 因此 `mixins.json` 里**没有 `refmap` 键**，Fabric 侧也不再做 intermediary 重映射。
 
 ### 七、三处安全夹取（防止调低上限时丢物品 / 出现负数增量）
 
@@ -202,10 +204,11 @@ this.addSlot(new Slot(this.enchantSlots, 0, 15, 47) {
 ### 八、数量本身也要装得下：本代的瓶颈是**校验型 Codec**
 
 把上限抬到几千之后还有一件容易忽略的事：**数量在数据模型里也是有范围的**。本代原版把
-`ItemStack.CODEC` 的数量字段写成：
+本代数量字段的**源头**是 `ItemStack.MAP_CODEC`（`MapCodec.recursive(…)` 形式，`CODEC`
+反过来由它派生）：
 
 ```java
-ExtraCodecs.intRange(1, 99).fieldOf("count").orElse(1)
+ExtraCodecs.optionalAlwaysPresentFieldOf(ExtraCodecs.intRange(1, 99), "count", 1)
 ```
 
 `intRange` 是**校验型**编解码器——越界返回**错误**，而不是截断。所以"只放大
@@ -214,14 +217,15 @@ ExtraCodecs.intRange(1, 99).fieldOf("count").orElse(1)
 
 | 路径 | 用到的编解码器 | 不处理会怎样 |
 |---|---|---|
-| 存档（区块、玩家背包、方块容器、掉落物实体） | `ItemStack.CODEC` / `OPTIONAL_CODEC` | 数量 > 99 时**编码失败**，物品保存不下去 |
-| 创造模式取物包 | `ItemStack.CODEC`（经 `validatedStreamCodec` 复校） | 未装本模组的一端会在解码时直接报错 |
-| 其它网络包 | `OPTIONAL_STREAM_CODEC` | **不受影响**——数量字段本来就是 `VarInt` |
+| 存档（区块、玩家背包、方块容器、掉落物实体） | `MAP_CODEC`（容器侧通过 `ItemStackWithSlot.CODEC` 引用它）/ `OPTIONAL_CODEC` | 数量 > 99 时**编码失败**，物品保存不下去 |
+| 创造模式取物包 | `CODEC`（经 `validatedStreamCodec` 复校） | 未装本模组的一端会在解码时直接报错 |
+| 其它网络包 | 数量字段本来就是 `VarInt` | **不受影响** |
 
-本模组的做法是在 `ItemStack` 静态初始化块末尾整体替换 `CODEC`，除把数量区间放开到
-`[1, Integer.MAX_VALUE]` 外，`id` 与 `components` 两项与原版**逐字一致**；同时把由它派生、
-**按值捕获**了旧实例的 `OPTIONAL_CODEC` 一并重建——不重建的话，创造模式保存的物品栏（热键栏）
-在编码时会失败，表现为该格被静默替换为空。
+本模组的做法是在 `ItemStack` 静态初始化块末尾，**以 `MAP_CODEC` 为根**整体重建，除把数量
+区间放开到 `[1, Integer.MAX_VALUE]` 外，`id` 与 `components` 两项与原版**逐字一致**；
+`CODEC` 与 `OPTIONAL_CODEC` 也一并重建——它们是**按值捕获**了旧实例的，不重建就不会跟着变
+（不重建 `OPTIONAL_CODEC` 的话，创造模式保存的物品栏/热键栏在编码时会失败，表现为该格被
+静默替换为空）。本代的 `STRICT_CODEC` 已被原版删除，严格校验改为调用方直接执行。
 
 > **为什么不改传输层**：1.20.5 起网络里的数量已经是 `VarInt`，没有 8 位限制。所以 1.0.0
 > （1.20.1）里那两条"把 `writeByte` 改成 VarInt""给存档补写 `putInt`"的补丁在本代**全部作废**：
@@ -256,13 +260,13 @@ ExtraCodecs.intRange(1, 99).fieldOf("count").orElse(1)
 （`intRange` 是校验型的，越界返回错误而非截断），而且这个限制藏在数据模型里，
 不像单字节那样一眼看得出来。
 
-#### 本模组在 1.21.1 上做的事
+#### 本模组在 26.2 上做的事
 
 | 层 | 原版 | 不处理会怎样 | 本模组 |
 |---|---|---|---|
-| 物品上限 | `ItemStack#getMaxStackSize()` → 64 / 16 / 1 | 堆不过原版值 | 返回 `global_max` |
+| 物品上限 | `ItemInstance#getMaxStackSize()` → 64 / 16 / 1 | 堆不过原版值 | 返回 `global_max`。⚠ **NeoForge 侧还要额外接管 `ItemStack` 自己的同名方法**，见 [CHANGELOG](CHANGELOG.md) |
 | 容器每格上限 | `Container#getMaxStackSize(ItemStack)` = `min(99, 物品上限)` | 界面与插入逻辑仍按 64 | 按容器类型分别给值，**漏斗显式保持原版** |
-| **存档 / 校验** | `ItemStack.CODEC` 的数量区间 `[1, 99]` | 数量 > 99 **保存失败** | 在 `<clinit>` 末尾整体替换 `CODEC`，区间放开到 `[1, Integer.MAX_VALUE]` |
+| **存档 / 校验** | `ItemStack.MAP_CODEC` 的数量区间 `[1, 99]` | 数量 > 99 **保存失败** | 以 `MAP_CODEC` 为根整体重建，区间放开到 `[1, Integer.MAX_VALUE]` |
 | 插入即截断 | `limitSize(this.getMaxStackSize(stack))`（共 6 处） | 调低上限时一次性销毁超量堆叠 | 容量返回值夹到不小于当前数量 |
 | 客户端 GUI | 镜像容器不被识别 | 显示与拖拽预览都按 64 | 登记镜像容器 |
 
@@ -291,15 +295,18 @@ Stackable 是"把**所有**容器的堆叠上限一起抬高"；本模组默认�
 
 | 加载器 | 前置 | 装哪个 jar |
 |---|---|---|
-| **Fabric** | [Fabric Loader](https://fabricmc.net/use/installer/) ≥ 0.16.1 + [Fabric API](https://modrinth.com/mod/fabric-api) | `BetterItemStack-1.21.1-fabric-<版本>.jar` |
-| **Forge** | [Forge](https://files.minecraftforge.net/net/minecraftforge/forge/) 52.1.x | `BetterItemStack-1.21.1-forge-<版本>.jar` |
-| **NeoForge** | NeoForge 21.1.x | `BetterItemStack-1.21.1-neoforge-<版本>.jar` |
+| **Fabric** | [Fabric Loader](https://fabricmc.net/use/installer/) ≥ **0.19.5** + [Fabric API](https://modrinth.com/mod/fabric-api) | `BetterItemStack-26.2-fabric-<版本>.jar` |
+| **Forge** | [Forge](https://files.minecraftforge.net/net/minecraftforge/forge/) 65.1.x | `BetterItemStack-26.2-forge-<版本>.jar` |
+| **NeoForge** | NeoForge 26.2.x | `BetterItemStack-26.2-neoforge-<版本>.jar` |
 
-把对应的 jar 放进 `.minecraft/mods/` 即可，运行时需要 **Java 21**。
+把对应的 jar 放进 `.minecraft/mods/` 即可，运行时需要 **Java 25**。
 
-> **关于 1.21.1 的 NeoForge**：这一代 NeoForge 已经是**独立实现**（包名是 `net.neoforged`、
-> 模组 ID 是 `neoforge`），与 Forge 产物**互不通用**——这与 1.20.1 时代"两者互为镜像、
-> 可以互换"正好相反。仍然**不要同时装两个。**
+> **Fabric 的 Loader 门槛是 0.19.5**：0.19.4 内嵌的 MixinExtras 0.5.4 在扫描 `@Redirect`
+> 时有一个类型强转缺陷，会让游戏在启动阶段直接崩——它**与本模组无关**，但会影响所有用到
+> `@Redirect` 的模组；0.19.5 起自带修好的 0.5.5。
+
+> **关于 26.2 的 NeoForge**：与 Forge 是**两套独立实现**（包名 `net.neoforged`、
+> 模组 ID 是 `neoforge`），两份产物**互不通用**。**不要同时装两个。**
 
 ---
 
@@ -437,7 +444,8 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 | Minecraft | 结论 |
 |---|---|
-| **1.21.11** | ✅ 三平台各一份 |
+| **26.2** | ✅ 三平台各一份 |
+| 1.21.11 | ✅ 由 `1.21.11` 分支的 1.2.x 提供（那一代 `getMaxStackSize()` 还是 `ItemStack` 自己的方法，接管点与本分支不同） |
 | 1.21.1 | ✅ 由 `1.21.1` 分支的 1.1.x 提供（那一代 `ItemStack` 的编解码没有 `MAP_CODEC` 这层根，替换点与本分支不同） |
 | 1.20.1 | ✅ 由 `1.20.1` 分支的 1.0.x 提供（那一代数量走手写字节流，机制与本分支不同） |
 | 其它版本 | ❌ 不适用。1.21 一代的其它小版本未做验证；1.20.4 及更早没有物品组件，本构建会因符号缺失而无法启动 |
@@ -453,7 +461,7 @@ Forge / NeoForge 自 1.20.6 起**运行期就是官方命名**，产物无需再
 
 | 配置 | 玩家可见 | 作用 |
 |---|---|---|
-| `minecraft_version` | ✅ 进 `depends.minecraft` / `mods.toml` | 编译目标（1.21.1） |
+| `minecraft_version` | ✅ 进 `depends.minecraft` / `mods.toml` | 编译目标（26.2） |
 | `minecraft_version_range` | ✅ 同上 | 声明支持的区间 |
 | `fabric_loader_requires` | ✅ 进 `fabric.mod.json` 的 `depends.fabricloader` | Fabric 玩家门槛，取**能工作的最低版本** |
 | `forge_version_range` / `neoforge_version_range` | ✅ 进 `mods.toml` 的依赖段 | Forge / NeoForge 玩家门槛 |
@@ -462,7 +470,7 @@ Forge / NeoForge 自 1.20.6 起**运行期就是官方命名**，产物无需再
 | `forge_version` / `neoforge_version` | ❌ | 编译期的 Forge / NeoForge 版本 |
 | `loom_version` / `moddev_version` / `forge_gradle_version` / `mixin_gradle_version` | ❌ | 构建插件的版本 |
 | `neo_form_version` | ❌ | 供 `common` 子项目独立编译用的 NeoForm 版本 |
-| `java_version` | ✅ 进元数据 | 编译目标（本代 = 21） |
+| `java_version` | ✅ 进元数据 | 编译目标（本代 = 25） |
 
 Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以门槛设低只会放宽、不会收紧。
 
@@ -475,8 +483,9 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
 | 1.16.3 | 9.4.0 | 21 |
 | 1.17.21 | 9.5.0 | 21 |
 | 1.18.3 | 9.7.0 | 25 |
+| **1.18.4** | 9.7.0 | **25** |
 
-本项目用 **Gradle 8.14.2 + JDK 21**，对应当前取值 **Loom 1.13.6**。
+本项目用 **Gradle 9.7.1 + JDK 25**，对应当前取值 **Loom 1.18.4**。
 **不要用 `-SNAPSHOT`**——浮动版本会让构建不可复现。
 
 ### 在哪里查版本
@@ -531,7 +540,7 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
 | `ScreenHandlerMixin` | `AbstractContainerMenu#addSlot` |
 | `HopperBlockEntityMixin` | `HopperBlockEntity` 的 `isFullContainer`、`tryMoveInItem`、`inventoryFull`、`canMergeItems` 里的 `ItemStack#getMaxStackSize()` |
 | `ItemEntityMixin` | `ItemEntity#merge` |
-| `client.DrawContextMixin` | `GuiGraphics#renderItemDecorations` |
+| `client.DrawContextMixin` | `GuiGraphicsExtractor#itemDecorations` |
 
 ### 几类最容易冲突的模组
 
@@ -557,12 +566,13 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
 2. 只留本模组（+ 原版）跑一次，确认单独工作正常；
 3. 二分法把其它模组加回来，定位到具体哪一个。
 
-### 特别提示：本模组替换了物品的 `ItemStack.CODEC`
+### 特别提示：本模组重建了物品的 `ItemStack.MAP_CODEC`
 
-本代原版把数量区间写死在校验型 Codec 里（`intRange(1, 99)`），本模组在 `ItemStack` 的
-静态初始化块末尾整体替换了 `CODEC`（详见第八节）。由此带来两类额外风险：
+本代原版把数量区间写死在校验型 Codec 里（`intRange(1, 99)`），而**根**是 `MAP_CODEC`
+（`CODEC` / `OPTIONAL_CODEC` 都由它派生）。本模组在 `ItemStack` 的静态初始化块末尾
+以 `MAP_CODEC` 为根整体重建了这三个实例（详见第八节）。由此带来两类额外风险：
 
-- **任何同样替换或包装 `ItemStack.CODEC` 的模组都可能冲突**——两边各自持有自己的实例时，
+- **任何同样替换或包装物品 Codec 的模组都可能冲突**——两边各自持有自己的实例时，
   后执行的那个生效，另一方的改动静默失效；
 - **数量 > 99 时联机两端都要装本模组**：只装一端的话，未装的一端会在创造模式取物包的解码
   或容器保存时报错（**数量 ≤ 99 时仍然完全兼容**）。
@@ -577,23 +587,23 @@ Fabric Loader 与 Fabric API 都向后兼容（新版能跑旧模组），所以
 ```bash
 ./gradlew build               # 构建三个平台的产物
 ./gradlew :fabric:build       # 只构建某一个平台
-./gradlew :fabric:runClient   # Fabric / NeoForge 的开发环境客户端
-./gradlew :neoforge:runServer # Fabric / NeoForge 的开发环境服务端
-./gradlew :forge:Client       # Forge 走 ForgeGradle，任务名没有 run 前缀
-./gradlew :forge:Server
+./gradlew :fabric:runClient   # 开发环境客户端（换成 runServer 即服务端）
+./gradlew :forge:runClient
+./gradlew :neoforge:runClient
 ```
 
 产物在各平台的 `build/libs/` 下：
 
-- `fabric/build/libs/BetterItemStack-1.21.1-fabric-<版本>.jar`
-- `forge/build/libs/BetterItemStack-1.21.1-forge-<版本>.jar`
-- `neoforge/build/libs/BetterItemStack-1.21.1-neoforge-<版本>.jar`
+- `fabric/build/libs/BetterItemStack-26.2-fabric-<版本>.jar`
+- `forge/build/libs/BetterItemStack-26.2-forge-<版本>.jar`
+- `neoforge/build/libs/BetterItemStack-26.2-neoforge-<版本>.jar`
 
 > Fabric 下还会有一份 `-dev.jar` 落在 `build/devlibs/`，那是**未重映射**的中间产物，
 > 只用于本地调试，不要分发。Forge 侧设了 `reobf = false`（本代运行期就是官方命名），
 > 因此只有 `build/libs` 一份。
 
-构建环境：Gradle 8.14.2 + JDK 21（`java_version = 21` 是编译目标，与运行 Gradle 的 JDK 无关）。
+构建环境：Gradle 9.7.1 + JDK 25（`java_version = 25` 是编译目标，与运行 Gradle 的 JDK 无关；
+26.2 起 Loom 与游戏本身都要求 Java 25）。
 不生成 `-sources.jar`。push / PR 会触发 GitHub Actions 构建，产物作为 Artifacts 上传（保留 90 天）。
 
 ### 发布新版本
